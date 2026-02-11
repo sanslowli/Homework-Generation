@@ -11,28 +11,23 @@ import pandas as pd
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [디자인 커스텀] CSS 주입
+# [추가] 로컬 느낌의 회색 배경색 주입 (CSS)
 st.markdown("""
     <style>
-        /* 메인 배경색을 깨끗한 화이트로 */
+        /* 메인 배경색 */
         .stApp {
-            background-color: #FFFFFF;
+            background-color: #F0F2F6;
         }
-        /* 사이드바(메뉴바)를 찐하고 어둡게 */
+        /* 사이드바 배경색 */
         [data-testid="stSidebar"] {
-            background-color: #262730;
+            background-color: #E0E2E6;
         }
-        /* 사이드바 내의 텍스트와 라벨을 화이트로 */
-        [data-testid="stSidebar"] .stMarkdown p, 
-        [data-testid="stSidebar"] label {
-            color: #FFFFFF !important;
-        }
-        /* 버튼 폰트 크기 조절 (이모지를 크게) */
-        div.stButton > button {
-            font-size: 20px !important;
+        /* 버튼 테두리 및 텍스트 정돈 */
+        .stButton>button {
+            border-radius: 8px;
         }
     </style>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
 BASE_FOLDER = "." 
 TARGET_FOLDERS = ["Syntax Pitching", "Syntax Only", "Syntax + Open-ended Question"]
@@ -175,6 +170,8 @@ elif st.session_state['mode'] == 'playing':
         current_img_path = playlist[idx]
         st.image(current_img_path, use_container_width=True)
 
+        # 훈련 화면에서 타율/기록 표시 제거됨
+
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("⬅️ 뒤로가기", use_container_width=True) and idx > 0:
@@ -182,14 +179,12 @@ elif st.session_state['mode'] == 'playing':
                 if st.session_state['results']: st.session_state['results'].pop()
                 st.rerun()
         with col2:
-            # 다시 버튼: 🙅
             if st.button("🙅", key='fail', use_container_width=True):
                 if not is_practice and client: save_to_sheet(client, st.session_state['student_name'], st.session_state['chapter_name'], os.path.basename(current_img_path), "X")
                 st.session_state['results'].append({'file': current_img_path, 'result': 'X'})
                 st.session_state['current_index'] += 1
                 st.rerun()
         with col3:
-            # 통과 버튼: 🙆
             if st.button("🙆", key='pass', use_container_width=True):
                 if not is_practice and client: save_to_sheet(client, st.session_state['student_name'], st.session_state['chapter_name'], os.path.basename(current_img_path), "O")
                 st.session_state['results'].append({'file': current_img_path, 'result': 'O'})
@@ -197,8 +192,7 @@ elif st.session_state['mode'] == 'playing':
                 st.rerun()
         
         if is_practice:
-            st.write("")
-            if st.button("연습 종료 (처음으로)", use_container_width=True):
+            if st.button("연습 종료 (결과 화면으로)", use_container_width=True):
                 st.session_state['mode'] = 'setup'
                 st.rerun()
 
