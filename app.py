@@ -118,16 +118,19 @@ def display_responsive_image(image_path, is_grid=False):
         st.error(f"Img Error: {e}")
         st.image(image_path, use_container_width=True)
 
+# [수정] 자바스크립트에 0.1초 딜레이 추가하여 버튼 늘어남 현상 방지
 def close_sidebar():
     js = """
     <script>
-        var sidebar = window.parent.document.querySelector('section[data-testid="stSidebar"]');
-        if (sidebar) {
-            var collapseBtn = sidebar.querySelector('button');
-            if (collapseBtn) {
-                collapseBtn.click();
+        setTimeout(function() {
+            var sidebar = window.parent.document.querySelector('section[data-testid="stSidebar"]');
+            if (sidebar) {
+                var collapseBtn = sidebar.querySelector('button');
+                if (collapseBtn) {
+                    collapseBtn.click();
+                }
             }
-        }
+        }, 100);
     </script>
     """
     st.components.v1.html(js, height=0, width=0)
@@ -196,7 +199,7 @@ if all_students_info:
         match = [s for s in all_students_info if s[1] == url_student]
         if match:
             selected_data = match[0]
-            # [수정] 박스 제거, 깔끔한 텍스트 유지
+            # [수정] 깔끔한 이름 표시 (박스 제거)
             st.sidebar.markdown(f'<div style="font-size: 20px; font-weight: 600; margin-bottom: 20px; color: #333;">{url_student} 님</div>', unsafe_allow_html=True)
         else:
             st.sidebar.error(f"'{url_student}' 미등록")
