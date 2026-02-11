@@ -6,14 +6,14 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import pandas as pd
 from PIL import Image
-import base64 # [추가] 이미지를 HTML로 직접 렌더링하기 위해 필요
+import base64
 
 # ==========================================
 # [설정] 기본 경로 및 구글 시트
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [업데이트] CSS: 모바일 폰트 조절 및 줄바꿈 방지, 아이콘 보호
+# [업데이트] CSS: 모바일 폰트 크기 70% 축소 (줄바꿈 허용)
 st.markdown("""
     <style>
         /* 기본 폰트 설정 (아이콘 제외) */
@@ -28,23 +28,25 @@ st.markdown("""
 
         /* [모바일 최적화] 화면 너비가 768px 이하일 때 적용 */
         @media only screen and (max-width: 768px) {
-            /* 제목 크기 대폭 축소 */
-            h1 { font-size: 24px !important; }
-            h3 { font-size: 18px !important; }
-            p, div, span { font-size: 14px !important; }
+            /* 1. 제목 크기 축소 (약 70%) */
+            h1 { font-size: 22px !important; }
+            h3 { font-size: 16px !important; }
+            p, div, span { font-size: 13px !important; }
             
-            /* 사이드바 제목 줄바꿈 방지 및 크기 조절 */
+            /* 2. 사이드바 제목 축소 (줄바꿈 허용) */
             .sidebar-title {
-                font-size: 18px !important;
-                white-space: nowrap !important;
-                overflow: hidden !important;
-                text-overflow: ellipsis !important;
+                font-size: 20px !important; 
+                margin-bottom: 10px !important;
             }
             
-            /* 푸터 줄바꿈 방지 */
+            /* 3. 푸터 텍스트 축소 */
             .footer-text {
                 font-size: 11px !important;
-                white-space: nowrap !important;
+            }
+            
+            /* 4. 버튼 텍스트도 살짝 줄임 */
+            .stButton>button {
+                font-size: 14px !important;
             }
         }
 
@@ -100,7 +102,9 @@ def save_to_sheet(client, student, chapter, image, result):
     except Exception as e:
         st.error(f"데이터 저장 실패: {e}")
 
-# [NEW] 이미지를 Base64 문자열로 변환 (HTML 렌더링용)
+# [최적화] 이미지 변환 결과 캐싱 (@st.cache_data)
+# - 한 번 변환한 이미지는 메모리에 저장해두고 재사용하여 속도 저하 방지
+@st.cache_data(show_spinner=False)
 def get_image_base64(image_path):
     with open(image_path, "rb") as img_file:
         return base64.b64encode(img_file.read()).decode()
@@ -156,7 +160,6 @@ def calculate_batting_average(df, student, image_path):
 # ==========================================
 client = init_connection()
 
-# [수정] 사이드바 제목을 st.title 대신 HTML로 커스텀 (폰트 제어 및 줄바꿈 방지)
 st.sidebar.markdown('<div class="sidebar-title">Syntax Pitching™</div>', unsafe_allow_html=True)
 
 query_params = st.query_params
@@ -215,7 +218,6 @@ if st.session_state['mode'] == 'setup':
     else:
         st.markdown("### 👈 왼쪽 사이드바에서 수강생을 선택해주세요.")
     
-    # [수정] 줄바꿈 방지 클래스 적용
     st.markdown('<div class="footer-text">© Powered by Kusukban | All Rights Reserved.</div>', unsafe_allow_html=True)
 
 elif st.session_state['mode'] == 'playing':
@@ -230,26 +232,24 @@ elif st.session_state['mode'] == 'playing':
     if idx < len(playlist):
         current_img_path = playlist[idx]
         
-        # [수정] HTML 렌더링으로 이미지 비율 완벽 통제 (모바일 Stacking 방지)
         try:
             abs_path = os.path.abspath(current_img_path)
             img = Image.open(abs_path)
             w, h = img.size
             actual_ratio = w / h
-            target_ratio = (3 * 2.69) / 2.45 # 약 3.29 (3칸 기준 비율)
+            target_ratio = (3 * 2.69) / 2.45
 
             # 너비 비율 계산 (최대 100%)
             width_pct = min(100, (actual_ratio / target_ratio) * 100)
-            
-            # 2칸짜리(약 66%) 등이 너무 작아 보이지 않도록 최소값 보정 (선택 사항, 현재는 정직하게 적용)
-            # 만약 너무 작다면 width_pct = max(width_pct, 40) 같은 로직 추가 가능
-            
             img_b64 = get_image_base64(abs_path)
             
-            # HTML로 중앙 정렬하여 이미지 출력
+            # [수정] 수직 중앙 정렬을 위한 Flexbox 설정
+            # - align-items: center -> 수직 중앙 정렬
+            # - min-height: 50vh -> 이미지가 작아도 최소한 화면 절반 높이의 공간을 확보하여 중앙에 띄움
             html_code = f"""
-            <div style="display: flex; justify-content: center; width: 100%;">
-                <img src="data:image/png;base64,{img_b64}" style="width: {width_pct}%; max-width: 100%; height: auto; border-radius: 5px;">
+            <div style="display: flex; justify-content: center; align-items: center; width: 100%; min-height: 50vh;">
+                <img src="data:image/png;base64,{img_b64}" 
+                     style="width: {width_pct}%; max-width: 100%; max-height: 80vh; height: auto; border-radius: 5px;">
             </div>
             """
             st.markdown(html_code, unsafe_allow_html=True)
