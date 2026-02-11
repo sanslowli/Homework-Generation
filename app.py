@@ -27,7 +27,7 @@ def init_connection():
         # Streamlit Secrets에서 키 가져오기
         # .streamlit/secrets.toml 파일 혹은 Streamlit Cloud Secrets에 
         # [connections.gsheets] 섹션 하위에 JSON 내용을 넣어야 함
-        credentials = st.secrets["connections.gsheets"]
+        credentials = st.secrets["connections"]["gsheets"]
         scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
         creds = ServiceAccountCredentials.from_json_keyfile_dict(dict(credentials), scope)
         client = gspread.authorize(creds)
