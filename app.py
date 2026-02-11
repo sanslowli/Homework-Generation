@@ -13,7 +13,7 @@ import base64
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [업데이트] CSS: 모바일 폰트 크기 70% 축소 (줄바꿈 허용)
+# [수정] 모바일 폰트 강제 축소(@media) 제거 -> 자연스러운 크기 유지
 st.markdown("""
     <style>
         /* 기본 폰트 설정 (아이콘 제외) */
@@ -26,31 +26,7 @@ st.markdown("""
         [data-testid="stSidebar"] { background-color: #E0E2E6; }
         .stButton>button { border-radius: 8px; font-weight: 500; }
 
-        /* [모바일 최적화] 화면 너비가 768px 이하일 때 적용 */
-        @media only screen and (max-width: 768px) {
-            /* 1. 제목 크기 축소 (약 70%) */
-            h1 { font-size: 22px !important; }
-            h3 { font-size: 16px !important; }
-            p, div, span { font-size: 13px !important; }
-            
-            /* 2. 사이드바 제목 축소 (줄바꿈 허용) */
-            .sidebar-title {
-                font-size: 20px !important; 
-                margin-bottom: 10px !important;
-            }
-            
-            /* 3. 푸터 텍스트 축소 */
-            .footer-text {
-                font-size: 11px !important;
-            }
-            
-            /* 4. 버튼 텍스트도 살짝 줄임 */
-            .stButton>button {
-                font-size: 14px !important;
-            }
-        }
-
-        /* 데스크탑 사이드바 제목 */
+        /* 데스크탑/모바일 공통 사이드바 제목 스타일 */
         .sidebar-title {
             font-size: 28px;
             font-weight: 700;
@@ -102,8 +78,6 @@ def save_to_sheet(client, student, chapter, image, result):
     except Exception as e:
         st.error(f"데이터 저장 실패: {e}")
 
-# [최적화] 이미지 변환 결과 캐싱 (@st.cache_data)
-# - 한 번 변환한 이미지는 메모리에 저장해두고 재사용하여 속도 저하 방지
 @st.cache_data(show_spinner=False)
 def get_image_base64(image_path):
     with open(image_path, "rb") as img_file:
@@ -243,9 +217,6 @@ elif st.session_state['mode'] == 'playing':
             width_pct = min(100, (actual_ratio / target_ratio) * 100)
             img_b64 = get_image_base64(abs_path)
             
-            # [수정] 수직 중앙 정렬을 위한 Flexbox 설정
-            # - align-items: center -> 수직 중앙 정렬
-            # - min-height: 50vh -> 이미지가 작아도 최소한 화면 절반 높이의 공간을 확보하여 중앙에 띄움
             html_code = f"""
             <div style="display: flex; justify-content: center; align-items: center; width: 100%; min-height: 50vh;">
                 <img src="data:image/png;base64,{img_b64}" 
