@@ -49,17 +49,28 @@ inject_mobile_meta_tags()
 st.markdown("""
     <style>
         /* =========================================
-           [스텔스 모드 CSS] Streamlit 흔적 지우기
+           [스텔스 모드 V2] 정밀 타격
            ========================================= */
         
-        /* 1. 상단 햄버거 메뉴 (점 3개) 숨기기 */
+        /* 1. 상단 햄버거 메뉴(점 3개)만 콕 집어서 숨기기 */
         #MainMenu {visibility: hidden;}
+        [data-testid="stMainMenu"] {visibility: hidden;}
         
-        /* 2. 하단 'Made with Streamlit' 푸터 숨기기 */
-        footer {visibility: hidden;}
+        /* 2. 하단 푸터 강력하게 숨기기 */
+        footer {visibility: hidden; display: none !important;}
         
-        /* 3. 상단 헤더 데코레이션(컬러바) 숨기기 */
-        header {visibility: hidden;}
+        /* 3. 상단 컬러바(데코레이션) 숨기기 */
+        [data-testid="stDecoration"] {visibility: hidden; display: none !important;}
+
+        /* [중요] 헤더 자체는 살려둬야 사이드바 버튼이 보임 */
+        /* 대신 배경을 투명하게 해서 위화감 없애기 */
+        [data-testid="stHeader"] {
+            background-color: transparent !important;
+        }
+
+        /* 4. 클라우드 배지(빨간색) 숨기기 시도 (Viewer Badge) */
+        .viewerBadge_container__1QSob {display: none !important;}
+        [data-testid="stStatusWidget"] {visibility: hidden;}
 
         /* =========================================
            [기본 UI 스타일]
