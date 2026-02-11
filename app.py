@@ -196,14 +196,8 @@ if all_students_info:
         match = [s for s in all_students_info if s[1] == url_student]
         if match:
             selected_data = match[0]
-            st.sidebar.success(f"수강생: {url_student}") # 이 부분은 URL 파라미터로 잡혔을 때만 뜨는 디버깅용이거나 예외 처리용일 수 있음. 아래에서 수정.
-            
-            # [수정] 초록색 박스(st.success) 제거 -> 깔끔한 화이트/그레이 박스로 변경
-            st.sidebar.markdown(f"""
-                <div style="background-color: #ffffff; padding: 10px; border-radius: 8px; margin-bottom: 10px; color: #333; border: 1px solid #ddd; font-weight: 500;">
-                    수강생: {url_student}
-                </div>
-            """, unsafe_allow_html=True)
+            # [수정] 박스 제거하고 깔끔한 텍스트로 변경
+            st.sidebar.markdown(f'<div style="font-size: 20px; font-weight: 600; margin-bottom: 20px; color: #333;">{url_student} 님</div>', unsafe_allow_html=True)
         else:
             st.sidebar.error(f"'{url_student}' 미등록")
             selected_data = st.sidebar.selectbox("수강생 선택", all_students_info, format_func=lambda x: x[1])
@@ -250,7 +244,6 @@ if 'mode' not in st.session_state: st.session_state['mode'] = 'setup'
 if st.session_state['mode'] == 'setup':
     st.title("Welcome to Syntax Pitching™")
     if url_student:
-        # [수정] 띄어쓰기 및 손가락 이모지(👈) 추가
         st.markdown(f"### {url_student} 님, 환영합니다!\n👈 왼쪽에서 챕터를 선택하고 훈련을 시작하세요.")
     else:
         st.markdown("### 👈 왼쪽 사이드바에서 수강생을 선택해주세요.")
