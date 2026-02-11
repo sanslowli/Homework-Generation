@@ -7,13 +7,14 @@ from datetime import datetime
 import pandas as pd
 from PIL import Image
 import base64
+import streamlit.components.v1 as components
 
 # ==========================================
 # [설정] 기본 경로 및 구글 시트
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [업데이트] CSS: 모바일 텍스트 계층 구조(Hierarchy) 확실하게 복구
+# [CSS] 스타일 설정 (모바일 최적화 및 계층 구조 유지)
 st.markdown("""
     <style>
         /* 1. 기본 폰트 설정 (전역) */
@@ -41,43 +42,12 @@ st.markdown("""
 
         /* 4. [모바일 최적화] 768px 이하에서 계급별 크기 차등 적용 */
         @media only screen and (max-width: 768px) {
-            
-            /* [1계급] 메인 타이틀: 압도적으로 크게 */
-            h1 { 
-                font-size: 32px !important; 
-                font-weight: 700 !important;
-                line-height: 1.3 !important;
-            }
-            
-            /* [2계급] 중간 안내 문구 (H3): 타이틀보다 작게, 본문보다 크게 */
-            h3 { 
-                font-size: 20px !important; 
-                font-weight: 600 !important;
-                margin-top: 10px !important;
-            }
-            
-            /* [3계급] 일반 본문 텍스트 (Markdown p 태그만 타겟팅) */
-            .stMarkdown p {
-                font-size: 16px !important;
-                line-height: 1.5 !important;
-            }
-            
-            /* [4계급] 사이드바 제목 */
-            .sidebar-title {
-                font-size: 22px !important; 
-                margin-bottom: 15px !important;
-            }
-            
-            /* [5계급] 푸터 (저작권): 가장 작게 (기준점) */
-            .footer-text {
-                font-size: 12px !important;
-                color: #999 !important;
-            }
-            
-            /* 버튼 텍스트 */
-            .stButton>button {
-                font-size: 16px !important;
-            }
+            h1 { font-size: 32px !important; font-weight: 700 !important; line-height: 1.3 !important; }
+            h3 { font-size: 20px !important; font-weight: 600 !important; margin-top: 10px !important; }
+            .stMarkdown p { font-size: 16px !important; line-height: 1.5 !important; }
+            .sidebar-title { font-size: 22px !important; margin-bottom: 15px !important; }
+            .footer-text { font-size: 12px !important; color: #999 !important; }
+            .stButton>button { font-size: 16px !important; }
         }
     </style>
     """, unsafe_allow_html=True)
@@ -122,6 +92,49 @@ def save_to_sheet(client, student, chapter, image, result):
 def get_image_base64(image_path):
     with open(image_path, "rb") as img_file:
         return base64.b64encode(img_file.read()).decode()
+
+# [NEW] 이미지 렌더링 로직 함수화 (훈련/기록 화면 공통 사용)
+def display_responsive_image(image_path, is_grid=False):
+    try:
+        abs_path = os.path.abspath(image_path)
+        img = Image.open(abs_path)
+        w, h = img.size
+        actual_ratio = w / h
+        target_ratio = (3 * 2.69) / 2.45 # 약 3.29
+
+        # 너비 비율 계산 (최대 100%)
+        width_pct = min(100, (actual_ratio / target_ratio) * 100)
+        img_b64 = get_image_base64(abs_path)
+        
+        # Grid(기록 화면)일 때는 min-height를 좀 작게 잡음
+        min_h = "200px" if is_grid else "50vh"
+        max_h = "100%" if is_grid else "80vh"
+
+        html_code = f"""
+        <div style="display: flex; justify-content: center; align-items: center; width: 100%; min-height: {min_h};">
+            <img src="data:image/png;base64,{img_b64}" 
+                 style="width: {width_pct}%; max-width: 100%; max-height: {max_h}; height: auto; border-radius: 5px;">
+        </div>
+        """
+        st.markdown(html_code, unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Img Error: {e}")
+        st.image(image_path, use_container_width=True)
+
+# [NEW] 사이드바 닫기 JS 주입 함수
+def close_sidebar():
+    js = """
+    <script>
+        var sidebar = window.parent.document.querySelector('section[data-testid="stSidebar"]');
+        if (sidebar) {
+            var collapseBtn = sidebar.querySelector('button');
+            if (collapseBtn) {
+                collapseBtn.click();
+            }
+        }
+    </script>
+    """
+    st.components.v1.html(js, height=0, width=0)
 
 # ==========================================
 # [로직] 탐색 및 통계
@@ -206,7 +219,8 @@ if all_students_info:
                     'chapter_path': selected_chapter_data[0], 'chapter_name': selected_chapter_data[1],
                     'original_playlist': get_images(folder_name, student_name, selected_chapter_data[0]),
                     'playlist': random.sample(get_images(folder_name, student_name, selected_chapter_data[0]), len(get_images(folder_name, student_name, selected_chapter_data[0]))),
-                    'current_index': 0, 'results': [], 'is_practice_mode': False, 'mode': 'playing'
+                    'current_index': 0, 'results': [], 'is_practice_mode': False, 'mode': 'playing',
+                    'close_sidebar': True # [트리거] 사이드바 닫기 신호
                 })
                 if client: st.session_state['db_data'] = get_data_from_sheet(client)
                 st.rerun()
@@ -215,10 +229,16 @@ if all_students_info:
                 st.session_state.update({
                     'folder_name': folder_name, 'student_name': student_name,
                     'chapter_path': selected_chapter_data[0], 'chapter_name': selected_chapter_data[1],
-                    'mode': 'records'
+                    'mode': 'records',
+                    'close_sidebar': True # [트리거] 사이드바 닫기 신호
                 })
                 if client: st.session_state['db_data'] = get_data_from_sheet(client)
                 st.rerun()
+
+# [로직] 사이드바 닫기 트리거 확인 및 실행
+if st.session_state.get('close_sidebar'):
+    close_sidebar()
+    st.session_state['close_sidebar'] = False
 
 # ==========================================
 # [화면] 메인 로직
@@ -246,27 +266,8 @@ elif st.session_state['mode'] == 'playing':
     if idx < len(playlist):
         current_img_path = playlist[idx]
         
-        try:
-            abs_path = os.path.abspath(current_img_path)
-            img = Image.open(abs_path)
-            w, h = img.size
-            actual_ratio = w / h
-            target_ratio = (3 * 2.69) / 2.45
-
-            width_pct = min(100, (actual_ratio / target_ratio) * 100)
-            img_b64 = get_image_base64(abs_path)
-            
-            html_code = f"""
-            <div style="display: flex; justify-content: center; align-items: center; width: 100%; min-height: 50vh;">
-                <img src="data:image/png;base64,{img_b64}" 
-                     style="width: {width_pct}%; max-width: 100%; max-height: 80vh; height: auto; border-radius: 5px;">
-            </div>
-            """
-            st.markdown(html_code, unsafe_allow_html=True)
-
-        except Exception as e:
-            st.error(f"Image Error: {e}")
-            st.image(current_img_path, use_container_width=True)
+        # [수정] 공통 함수로 이미지 출력
+        display_responsive_image(current_img_path, is_grid=False)
 
         col1, col2 = st.columns(2)
         with col1:
@@ -321,7 +322,9 @@ elif st.session_state['mode'] == 'records':
         cols = st.columns(3)
         for i, img_path in enumerate(imgs):
             with cols[i % 3]:
-                st.image(img_path, use_container_width=True)
+                # [수정] 기록 화면에서도 비율 유지 로직 적용 (is_grid=True)
+                display_responsive_image(img_path, is_grid=True)
+                
                 avg, history = calculate_batting_average(st.session_state['db_data'], st.session_state['student_name'], img_path)
                 color = "green" if avg >= 0.8 else "orange" if avg >= 0.5 else "red"
                 hist_str = " ".join([f"{h}" for h in history])
