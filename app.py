@@ -12,16 +12,12 @@ import streamlit.components.v1 as components
 # ==========================================
 # [설정] 기본 경로 및 구글 시트
 # ==========================================
-# [수정] page_title은 홈 화면 이름의 기본값이 됩니다.
-# page_icon은 브라우저 탭 아이콘입니다. (홈 화면 아이콘과는 다름, 하지만 통일)
 st.set_page_config(page_title="Syntax Pitching", page_icon="⚾", layout="wide")
 
 # ==========================================
 # [중요] 홈 화면 아이콘 강제 적용 (HTML 주입)
 # ==========================================
 def inject_mobile_meta_tags():
-    # 1. 현재 폴더에 있는 icon.png를 읽어서 Base64 코드로 변환
-    # (이미지 파일을 HTML 안에 직접 심어버리는 기술)
     icon_path = "icon.png"
     icon_base64 = ""
     
@@ -29,19 +25,13 @@ def inject_mobile_meta_tags():
         with open(icon_path, "rb") as image_file:
             icon_base64 = base64.b64encode(image_file.read()).decode()
             
-    # 2. 아이콘이 있다면 HTML 헤더에 적용
     if icon_base64:
         apple_touch_icon = f'<link rel="apple-touch-icon" href="data:image/png;base64,{icon_base64}">'
         shortcut_icon = f'<link rel="shortcut icon" href="data:image/png;base64,{icon_base64}">'
     else:
-        # 파일이 없으면 그냥 야구공 이모지라도 띄우도록 시도 (완벽하진 않음)
         apple_touch_icon = '<link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/25/25694.png">'
         shortcut_icon = '<link rel="shortcut icon" href="https://cdn-icons-png.flaticon.com/512/25/25694.png">'
 
-    # 3. 메타 태그 주입
-    # - apple-mobile-web-app-title: 홈 화면에 추가할 때 기본 이름
-    # - apple-mobile-web-app-capable: 주소창 없애기 (진짜 앱처럼)
-    # - apple-touch-icon: 홈 화면 아이콘
     meta_tags = f"""
     <head>
         <meta name="apple-mobile-web-app-title" content="Syntax Pitching">
@@ -53,24 +43,39 @@ def inject_mobile_meta_tags():
     """
     st.markdown(meta_tags, unsafe_allow_html=True)
 
-# 함수 실행
 inject_mobile_meta_tags()
-
 
 # [CSS] 스타일 설정
 st.markdown("""
     <style>
-        /* 1. 기본 폰트 설정 (전역) */
+        /* =========================================
+           [스텔스 모드 CSS] Streamlit 흔적 지우기
+           ========================================= */
+        
+        /* 1. 상단 햄버거 메뉴 (점 3개) 숨기기 */
+        #MainMenu {visibility: hidden;}
+        
+        /* 2. 하단 'Made with Streamlit' 푸터 숨기기 */
+        footer {visibility: hidden;}
+        
+        /* 3. 상단 헤더 데코레이션(컬러바) 숨기기 */
+        header {visibility: hidden;}
+
+        /* =========================================
+           [기본 UI 스타일]
+           ========================================= */
+
+        /* 기본 폰트 설정 (전역) */
         .stApp, .stMarkdown, p, h1, h2, h3, h4, div[data-testid="stMarkdownContainer"] {
             font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans KR", sans-serif !important;
         }
         
-        /* 2. 배경색 */
+        /* 배경색 */
         .stApp { background-color: #F0F2F6; }
         [data-testid="stSidebar"] { background-color: #E0E2E6; }
         .stButton>button { border-radius: 8px; font-weight: 500; }
 
-        /* 3. 데스크탑 스타일 (기본) */
+        /* 데스크탑 스타일 (기본) */
         .sidebar-title {
             font-size: 28px;
             font-weight: 700;
@@ -83,7 +88,7 @@ st.markdown("""
             font-size: 14px;
         }
 
-        /* 4. [모바일 최적화] */
+        /* [모바일 최적화] */
         @media only screen and (max-width: 768px) {
             h1 { font-size: 32px !important; font-weight: 700 !important; line-height: 1.3 !important; }
             h3 { font-size: 20px !important; font-weight: 600 !important; margin-top: 10px !important; }
