@@ -5,23 +5,25 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import pandas as pd
-from PIL import Image # 이미지 비율 분석용
+from PIL import Image
 
 # ==========================================
 # [설정] 기본 경로 및 구글 시트
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# 로컬 느낌의 배경색 및 버튼 스타일
 st.markdown("""
     <style>
+        html, body, [class*="css"], .stApp, .stMarkdown, p, h1, h2, h3, h4, span, label {
+            font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans KR", sans-serif !important;
+        }
         .stApp { background-color: #F0F2F6; }
         [data-testid="stSidebar"] { background-color: #E0E2E6; }
-        .stButton>button { border-radius: 8px; }
+        .stButton>button { border-radius: 8px; font-weight: 500; }
     </style>
     """, unsafe_allow_html=True)
 
-BASE_FOLDER = "." 
+BASE_FOLDER = os.path.dirname(os.path.abspath(__file__)) # [수정] 현재 파일 위치 기준 절대 경로 확보
 TARGET_FOLDERS = ["Syntax Pitching", "Syntax Only", "Syntax + Open-ended Question"]
 ALLOWED_SUBFOLDERS = ["현행 챕터", "지난 챕터"]
 SHEET_NAME = "Syntax Pitching DB"
@@ -164,7 +166,6 @@ if st.session_state['mode'] == 'setup':
         st.markdown(f"### {url_student}님, 환영합니다!\n왼쪽에서 챕터를 선택하고 훈련을 시작하세요.")
     else:
         st.markdown("### 👈 왼쪽 사이드바에서 수강생을 선택해주세요.")
-    st.markdown("---")
     st.caption("© Powered by Kusukban | All Rights Reserved.")
 
 elif st.session_state['mode'] == 'playing':
@@ -179,25 +180,28 @@ elif st.session_state['mode'] == 'playing':
     if idx < len(playlist):
         current_img_path = playlist[idx]
         
-        # [이미지 정밀 비율 로직]
+        # [수정] 이미지 비율 로직 강화
         try:
-            img = Image.open(current_img_path)
+            abs_path = os.path.abspath(current_img_path) # [수정] 절대 경로 확보
+            img = Image.open(abs_path)
             w, h = img.size
             actual_ratio = w / h
-            target_ratio = (3 * 2.69) / 2.45 # 약 3.2938 (3칸 기준)
+            target_ratio = (3 * 2.69) / 2.45
 
             if actual_ratio >= target_ratio:
-                st.image(current_img_path, use_container_width=True)
+                st.image(abs_path, use_container_width=True)
             else:
                 img_share = actual_ratio / target_ratio
                 padding = (1 - img_share) / 2
+                # [수정] 너무 작아지는 것을 방지하기 위해 최소 너비 확보 로직
                 cols = st.columns([padding, img_share, padding])
                 with cols[1]:
-                    st.image(current_img_path, use_container_width=True)
-        except:
+                    st.image(abs_path, use_container_width=True)
+        except Exception as e:
+            # 에러 발생 시 로그를 남기고 기본 출력
+            st.error(f"이미지 처리 오류: {e}")
             st.image(current_img_path, use_container_width=True)
 
-        # 🙆 통과 / 🙅 미통과 버튼
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🙅 미통과", key='fail', use_container_width=True):
