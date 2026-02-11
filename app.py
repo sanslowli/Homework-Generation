@@ -11,21 +11,11 @@ import pandas as pd
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [추가] 로컬 느낌의 회색 배경색 주입 (CSS)
 st.markdown("""
     <style>
-        /* 메인 배경색 */
-        .stApp {
-            background-color: #F0F2F6;
-        }
-        /* 사이드바 배경색 */
-        [data-testid="stSidebar"] {
-            background-color: #E0E2E6;
-        }
-        /* 버튼 테두리 및 텍스트 정돈 */
-        .stButton>button {
-            border-radius: 8px;
-        }
+        .stApp { background-color: #F0F2F6; }
+        [data-testid="stSidebar"] { background-color: #E0E2E6; }
+        .stButton>button { border-radius: 8px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -112,14 +102,34 @@ def calculate_batting_average(df, student, image_path):
     return recent_records.count('O') / len(recent_records), recent_records
 
 # ==========================================
-# [화면] 사이드바
+# [화면] 사이드바 (전용 링크 로직 포함)
 # ==========================================
 client = init_connection()
 st.sidebar.title("Syntax Pitching™")
 
+# 1. URL 파라미터 확인 (?student=홍길동)
+query_params = st.query_params
+url_student = query_params.get("student")
+
 all_students_info = get_all_students()
+selected_data = None
+
 if all_students_info:
-    selected_data = st.sidebar.selectbox("수강생 선택", all_students_info, format_func=lambda x: x[1])
+    # URL에 수강생 이름이 있는 경우
+    if url_student:
+        # 해당 학생 정보 찾기
+        match = [s for s in all_students_info if s[1] == url_student]
+        if match:
+            selected_data = match[0]
+            st.sidebar.success(f"수강생: {url_student}")
+            # 전용 링크인 경우 이름을 바꿀 수 없게 안내만 표시
+        else:
+            st.sidebar.error(f"'{url_student}' 학생을 찾을 수 없습니다.")
+            selected_data = st.sidebar.selectbox("수강생 선택", all_students_info, format_func=lambda x: x[1])
+    else:
+        # 일반 접속인 경우 기존처럼 선택
+        selected_data = st.sidebar.selectbox("수강생 선택", all_students_info, format_func=lambda x: x[1])
+
     if selected_data:
         folder_name, student_name = selected_data
         chapter_list = get_chapters(folder_name, student_name)
@@ -153,16 +163,19 @@ if 'mode' not in st.session_state: st.session_state['mode'] = 'setup'
 
 if st.session_state['mode'] == 'setup':
     st.title("Welcome to Syntax Pitching™")
-    st.markdown("### 👈 왼쪽 사이드바에서 수강생을 선택해주세요.\n© Powered by Kusukban | All Rights Reserved.")
+    if url_student:
+        st.markdown(f"### {url_student}님, 환영합니다!\n왼쪽에서 챕터를 선택하고 훈련을 시작하세요.")
+    else:
+        st.markdown("### 👈 왼쪽 사이드바에서 수강생을 선택해주세요.")
+    st.markdown("---")
+    st.caption("© Powered by Kusukban | All Rights Reserved.")
 
 elif st.session_state['mode'] == 'playing':
     playlist = st.session_state['playlist']
     idx = st.session_state['current_index']
     is_practice = st.session_state.get('is_practice_mode', False)
 
-    if is_practice:
-        st.warning("현재 '틀린 구간 반복 모드'입니다. (기록되지 않음)")
-    
+    if is_practice: st.warning("현재 '틀린 구간 반복 모드'입니다. (기록되지 않음)")
     st.progress(idx / len(playlist))
     st.caption(f"Progress: {idx + 1} / {len(playlist)}")
 
@@ -170,11 +183,9 @@ elif st.session_state['mode'] == 'playing':
         current_img_path = playlist[idx]
         st.image(current_img_path, use_container_width=True)
 
-        # 훈련 화면에서 타율/기록 표시 제거됨
-
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("⬅️ 뒤로가기", use_container_width=True) and idx > 0:
+            if st.button("⬅️", use_container_width=True) and idx > 0:
                 st.session_state['current_index'] -= 1
                 if st.session_state['results']: st.session_state['results'].pop()
                 st.rerun()
@@ -192,7 +203,7 @@ elif st.session_state['mode'] == 'playing':
                 st.rerun()
         
         if is_practice:
-            if st.button("연습 종료 (결과 화면으로)", use_container_width=True):
+            if st.button("연습 종료", use_container_width=True):
                 st.session_state['mode'] = 'setup'
                 st.rerun()
 
