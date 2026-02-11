@@ -102,12 +102,11 @@ def calculate_batting_average(df, student, image_path):
     return recent_records.count('O') / len(recent_records), recent_records
 
 # ==========================================
-# [화면] 사이드바 (전용 링크 로직 포함)
+# [화면] 사이드바
 # ==========================================
 client = init_connection()
 st.sidebar.title("Syntax Pitching™")
 
-# 1. URL 파라미터 확인 (?student=홍길동)
 query_params = st.query_params
 url_student = query_params.get("student")
 
@@ -115,19 +114,15 @@ all_students_info = get_all_students()
 selected_data = None
 
 if all_students_info:
-    # URL에 수강생 이름이 있는 경우
     if url_student:
-        # 해당 학생 정보 찾기
         match = [s for s in all_students_info if s[1] == url_student]
         if match:
             selected_data = match[0]
             st.sidebar.success(f"수강생: {url_student}")
-            # 전용 링크인 경우 이름을 바꿀 수 없게 안내만 표시
         else:
-            st.sidebar.error(f"'{url_student}' 학생을 찾을 수 없습니다.")
+            st.sidebar.error(f"'{url_student}' 미등록 수강생")
             selected_data = st.sidebar.selectbox("수강생 선택", all_students_info, format_func=lambda x: x[1])
     else:
-        # 일반 접속인 경우 기존처럼 선택
         selected_data = st.sidebar.selectbox("수강생 선택", all_students_info, format_func=lambda x: x[1])
 
     if selected_data:
@@ -183,26 +178,23 @@ elif st.session_state['mode'] == 'playing':
         current_img_path = playlist[idx]
         st.image(current_img_path, use_container_width=True)
 
-        col1, col2, col3 = st.columns(3)
+        # [수정] 뒤로가기 삭제 및 버튼 텍스트 변경
+        col1, col2 = st.columns(2)
         with col1:
-            if st.button("⬅️", use_container_width=True) and idx > 0:
-                st.session_state['current_index'] -= 1
-                if st.session_state['results']: st.session_state['results'].pop()
-                st.rerun()
-        with col2:
-            if st.button("🙅", key='fail', use_container_width=True):
+            if st.button("🙅 미통과", key='fail', use_container_width=True):
                 if not is_practice and client: save_to_sheet(client, st.session_state['student_name'], st.session_state['chapter_name'], os.path.basename(current_img_path), "X")
                 st.session_state['results'].append({'file': current_img_path, 'result': 'X'})
                 st.session_state['current_index'] += 1
                 st.rerun()
-        with col3:
-            if st.button("🙆", key='pass', use_container_width=True):
+        with col2:
+            if st.button("🙆 통과", key='pass', use_container_width=True):
                 if not is_practice and client: save_to_sheet(client, st.session_state['student_name'], st.session_state['chapter_name'], os.path.basename(current_img_path), "O")
                 st.session_state['results'].append({'file': current_img_path, 'result': 'O'})
                 st.session_state['current_index'] += 1
                 st.rerun()
         
         if is_practice:
+            st.write("")
             if st.button("연습 종료", use_container_width=True):
                 st.session_state['mode'] = 'setup'
                 st.rerun()
