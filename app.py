@@ -5,12 +5,14 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import pandas as pd
+from PIL import Image # 이미지 비율 분석용
 
 # ==========================================
 # [설정] 기본 경로 및 구글 시트
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
+# 로컬 느낌의 배경색 및 버튼 스타일
 st.markdown("""
     <style>
         .stApp { background-color: #F0F2F6; }
@@ -120,7 +122,7 @@ if all_students_info:
             selected_data = match[0]
             st.sidebar.success(f"수강생: {url_student}")
         else:
-            st.sidebar.error(f"'{url_student}' 미등록 수강생")
+            st.sidebar.error(f"'{url_student}' 미등록")
             selected_data = st.sidebar.selectbox("수강생 선택", all_students_info, format_func=lambda x: x[1])
     else:
         selected_data = st.sidebar.selectbox("수강생 선택", all_students_info, format_func=lambda x: x[1])
@@ -176,9 +178,26 @@ elif st.session_state['mode'] == 'playing':
 
     if idx < len(playlist):
         current_img_path = playlist[idx]
-        st.image(current_img_path, use_container_width=True)
+        
+        # [이미지 정밀 비율 로직]
+        try:
+            img = Image.open(current_img_path)
+            w, h = img.size
+            actual_ratio = w / h
+            target_ratio = (3 * 2.69) / 2.45 # 약 3.2938 (3칸 기준)
 
-        # [수정] 뒤로가기 삭제 및 버튼 텍스트 변경
+            if actual_ratio >= target_ratio:
+                st.image(current_img_path, use_container_width=True)
+            else:
+                img_share = actual_ratio / target_ratio
+                padding = (1 - img_share) / 2
+                cols = st.columns([padding, img_share, padding])
+                with cols[1]:
+                    st.image(current_img_path, use_container_width=True)
+        except:
+            st.image(current_img_path, use_container_width=True)
+
+        # 🙆 통과 / 🙅 미통과 버튼
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🙅 미통과", key='fail', use_container_width=True):
