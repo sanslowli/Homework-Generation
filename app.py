@@ -11,6 +11,29 @@ import pandas as pd
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
+# [디자인 커스텀] CSS 주입
+st.markdown("""
+    <style>
+        /* 메인 배경색을 깨끗한 화이트로 */
+        .stApp {
+            background-color: #FFFFFF;
+        }
+        /* 사이드바(메뉴바)를 찐하고 어둡게 */
+        [data-testid="stSidebar"] {
+            background-color: #262730;
+        }
+        /* 사이드바 내의 텍스트와 라벨을 화이트로 */
+        [data-testid="stSidebar"] .stMarkdown p, 
+        [data-testid="stSidebar"] label {
+            color: #FFFFFF !important;
+        }
+        /* 버튼 폰트 크기 조절 (이모지를 크게) */
+        div.stButton > button {
+            font-size: 20px !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 BASE_FOLDER = "." 
 TARGET_FOLDERS = ["Syntax Pitching", "Syntax Only", "Syntax + Open-ended Question"]
 ALLOWED_SUBFOLDERS = ["현행 챕터", "지난 챕터"]
@@ -119,7 +142,6 @@ if all_students_info:
                 if client: st.session_state['db_data'] = get_data_from_sheet(client)
                 st.rerun()
 
-            # [수정] 구분선 제거 및 이모지 삭제
             if st.sidebar.button("피칭 기록 보기", use_container_width=True):
                 st.session_state.update({
                     'folder_name': folder_name, 'student_name': student_name,
@@ -151,15 +173,7 @@ elif st.session_state['mode'] == 'playing':
 
     if idx < len(playlist):
         current_img_path = playlist[idx]
-        # [수정] 이미지 하단 캡션(파일명) 제거
         st.image(current_img_path, use_container_width=True)
-
-        if not is_practice and 'db_data' in st.session_state:
-            avg, history = calculate_batting_average(st.session_state['db_data'], st.session_state['student_name'], current_img_path)
-            color = "green" if avg >= 0.8 else "orange" if avg >= 0.5 else "red"
-            # [수정] 최근 기록 이모지를 O/X 텍스트로 변경
-            hist_str = " ".join([f"{h}" for h in history])
-            st.markdown(f"**최근 타율:** :{color}[{avg*100:.0f}%]  |  **기록:** {hist_str}")
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -168,32 +182,32 @@ elif st.session_state['mode'] == 'playing':
                 if st.session_state['results']: st.session_state['results'].pop()
                 st.rerun()
         with col2:
-            if st.button("❌ 다시", key='fail', use_container_width=True):
+            # 다시 버튼: 🙅
+            if st.button("🙅", key='fail', use_container_width=True):
                 if not is_practice and client: save_to_sheet(client, st.session_state['student_name'], st.session_state['chapter_name'], os.path.basename(current_img_path), "X")
                 st.session_state['results'].append({'file': current_img_path, 'result': 'X'})
                 st.session_state['current_index'] += 1
                 st.rerun()
         with col3:
-            if st.button("⭕️ 통과", key='pass', use_container_width=True):
+            # 통과 버튼: 🙆
+            if st.button("🙆", key='pass', use_container_width=True):
                 if not is_practice and client: save_to_sheet(client, st.session_state['student_name'], st.session_state['chapter_name'], os.path.basename(current_img_path), "O")
                 st.session_state['results'].append({'file': current_img_path, 'result': 'O'})
                 st.session_state['current_index'] += 1
                 st.rerun()
         
-        # [수정] 틀린 구간 연습 시 종료할 수 있는 버튼 추가
         if is_practice:
-            if st.button("연습 종료 (결과 화면으로)", use_container_width=True):
+            st.write("")
+            if st.button("연습 종료 (처음으로)", use_container_width=True):
                 st.session_state['mode'] = 'setup'
                 st.rerun()
 
     else:
-        # [수정] 무한루프 로직: 틀린 구간 연습 모드면 다시 시작
         if is_practice:
             random.shuffle(st.session_state['playlist'])
             st.session_state['current_index'] = 0
             st.rerun()
         else:
-            # 실전 모드 종료 화면 (풍선 효과 삭제)
             st.success("훈련 완료!")
             results = st.session_state['results']
             failed_items = [r['file'] for r in results if r['result'] == 'X']
@@ -201,20 +215,18 @@ elif st.session_state['mode'] == 'playing':
             st.markdown("---")
             c1, c2, c3 = st.columns(3)
             with c1:
-                # [수정] 버튼 이름 변경 및 이모지 삭제
                 if st.button("재도전", use_container_width=True):
                     st.session_state.update({'playlist': random.sample(st.session_state['original_playlist'], len(st.session_state['original_playlist'])), 'current_index': 0, 'results': [], 'is_practice_mode': False})
                     if client: st.session_state['db_data'] = get_data_from_sheet(client)
                     st.rerun()
             with c2:
-                if failed_items and st.button("틀린 구간 반복 (기록 X)", use_container_width=True):
+                if failed_items and st.button("틀린 구간 반복", use_container_width=True):
                     st.session_state.update({'playlist': random.sample(failed_items, len(failed_items)), 'current_index': 0, 'results': [], 'is_practice_mode': True})
                     st.rerun()
             with c3:
                 if st.button("처음으로", use_container_width=True): st.session_state['mode'] = 'setup'; st.rerun()
 
 elif st.session_state['mode'] == 'records':
-    # [수정] 페이지 제목 이모지 삭제
     st.title(f"피칭 기록: {st.session_state['student_name']} - {st.session_state['chapter_name']}")
     if st.button("뒤로가기"): st.session_state['mode'] = 'setup'; st.rerun()
     
@@ -226,6 +238,5 @@ elif st.session_state['mode'] == 'records':
                 st.image(img_path, use_container_width=True)
                 avg, history = calculate_batting_average(st.session_state['db_data'], st.session_state['student_name'], img_path)
                 color = "green" if avg >= 0.8 else "orange" if avg >= 0.5 else "red"
-                # [수정] 이모지 대신 O X 표시
                 hist_str = " ".join([f"{h}" for h in history])
                 st.caption(f"타율: :{color}[{avg*100:.0f}%] | {hist_str}")
