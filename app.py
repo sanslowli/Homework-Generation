@@ -13,10 +13,10 @@ import base64
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [업데이트] CSS: 모바일 텍스트 계층 구조(비율) 복구
+# [업데이트] CSS: 모바일 텍스트 계층 구조(Hierarchy) 확실하게 복구
 st.markdown("""
     <style>
-        /* 1. 기본 폰트 설정 (아이콘 제외) */
+        /* 1. 기본 폰트 설정 (전역) */
         .stApp, .stMarkdown, p, h1, h2, h3, h4, div[data-testid="stMarkdownContainer"] {
             font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans KR", sans-serif !important;
         }
@@ -26,7 +26,7 @@ st.markdown("""
         [data-testid="stSidebar"] { background-color: #E0E2E6; }
         .stButton>button { border-radius: 8px; font-weight: 500; }
 
-        /* 3. 데스크탑 기본 스타일 */
+        /* 3. 데스크탑 스타일 (기본) */
         .sidebar-title {
             font-size: 28px;
             font-weight: 700;
@@ -39,38 +39,42 @@ st.markdown("""
             font-size: 14px;
         }
 
-        /* 4. [모바일 최적화] 화면이 좁을 때(768px 이하) 비율에 맞춰 크기 차등 적용 */
+        /* 4. [모바일 최적화] 768px 이하에서 계급별 크기 차등 적용 */
         @media only screen and (max-width: 768px) {
             
-            /* (Level 1) 메인 타이틀: 확실히 크게 */
+            /* [1계급] 메인 타이틀: 압도적으로 크게 */
             h1 { 
-                font-size: 30px !important; 
+                font-size: 32px !important; 
+                font-weight: 700 !important;
                 line-height: 1.3 !important;
             }
             
-            /* (Level 2) 중간 제목 (안내 문구 등): 본문보다 약간 크게 */
+            /* [2계급] 중간 안내 문구 (H3): 타이틀보다 작게, 본문보다 크게 */
             h3 { 
-                font-size: 18px !important; 
+                font-size: 20px !important; 
+                font-weight: 600 !important;
                 margin-top: 10px !important;
             }
             
-            /* (Level 2.5) 일반 본문 텍스트 */
-            p, div, span, label { 
-                font-size: 15px !important; 
+            /* [3계급] 일반 본문 텍스트 (Markdown p 태그만 타겟팅) */
+            .stMarkdown p {
+                font-size: 16px !important;
+                line-height: 1.5 !important;
             }
             
-            /* 사이드바 제목: 적당한 크기로 */
+            /* [4계급] 사이드바 제목 */
             .sidebar-title {
                 font-size: 22px !important; 
                 margin-bottom: 15px !important;
             }
             
-            /* (Level 3) 푸터: 작게 유지 (기준점) */
+            /* [5계급] 푸터 (저작권): 가장 작게 (기준점) */
             .footer-text {
                 font-size: 12px !important;
+                color: #999 !important;
             }
             
-            /* 버튼 글씨: 터치하기 좋게 유지 */
+            /* 버튼 텍스트 */
             .stButton>button {
                 font-size: 16px !important;
             }
