@@ -14,7 +14,7 @@ import streamlit.components.v1 as components
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [CSS] 스타일 설정 (모바일 최적화 및 계층 구조 유지)
+# [CSS] 스타일 설정
 st.markdown("""
     <style>
         /* 1. 기본 폰트 설정 (전역) */
@@ -93,20 +93,17 @@ def get_image_base64(image_path):
     with open(image_path, "rb") as img_file:
         return base64.b64encode(img_file.read()).decode()
 
-# [NEW] 이미지 렌더링 로직 함수화 (훈련/기록 화면 공통 사용)
 def display_responsive_image(image_path, is_grid=False):
     try:
         abs_path = os.path.abspath(image_path)
         img = Image.open(abs_path)
         w, h = img.size
         actual_ratio = w / h
-        target_ratio = (3 * 2.69) / 2.45 # 약 3.29
+        target_ratio = (3 * 2.69) / 2.45
 
-        # 너비 비율 계산 (최대 100%)
         width_pct = min(100, (actual_ratio / target_ratio) * 100)
         img_b64 = get_image_base64(abs_path)
         
-        # Grid(기록 화면)일 때는 min-height를 좀 작게 잡음
         min_h = "200px" if is_grid else "50vh"
         max_h = "100%" if is_grid else "80vh"
 
@@ -121,7 +118,6 @@ def display_responsive_image(image_path, is_grid=False):
         st.error(f"Img Error: {e}")
         st.image(image_path, use_container_width=True)
 
-# [NEW] 사이드바 닫기 JS 주입 함수
 def close_sidebar():
     js = """
     <script>
@@ -200,7 +196,14 @@ if all_students_info:
         match = [s for s in all_students_info if s[1] == url_student]
         if match:
             selected_data = match[0]
-            st.sidebar.success(f"수강생: {url_student}")
+            st.sidebar.success(f"수강생: {url_student}") # 이 부분은 URL 파라미터로 잡혔을 때만 뜨는 디버깅용이거나 예외 처리용일 수 있음. 아래에서 수정.
+            
+            # [수정] 초록색 박스(st.success) 제거 -> 깔끔한 화이트/그레이 박스로 변경
+            st.sidebar.markdown(f"""
+                <div style="background-color: #ffffff; padding: 10px; border-radius: 8px; margin-bottom: 10px; color: #333; border: 1px solid #ddd; font-weight: 500;">
+                    수강생: {url_student}
+                </div>
+            """, unsafe_allow_html=True)
         else:
             st.sidebar.error(f"'{url_student}' 미등록")
             selected_data = st.sidebar.selectbox("수강생 선택", all_students_info, format_func=lambda x: x[1])
@@ -220,7 +223,7 @@ if all_students_info:
                     'original_playlist': get_images(folder_name, student_name, selected_chapter_data[0]),
                     'playlist': random.sample(get_images(folder_name, student_name, selected_chapter_data[0]), len(get_images(folder_name, student_name, selected_chapter_data[0]))),
                     'current_index': 0, 'results': [], 'is_practice_mode': False, 'mode': 'playing',
-                    'close_sidebar': True # [트리거] 사이드바 닫기 신호
+                    'close_sidebar': True
                 })
                 if client: st.session_state['db_data'] = get_data_from_sheet(client)
                 st.rerun()
@@ -230,12 +233,11 @@ if all_students_info:
                     'folder_name': folder_name, 'student_name': student_name,
                     'chapter_path': selected_chapter_data[0], 'chapter_name': selected_chapter_data[1],
                     'mode': 'records',
-                    'close_sidebar': True # [트리거] 사이드바 닫기 신호
+                    'close_sidebar': True
                 })
                 if client: st.session_state['db_data'] = get_data_from_sheet(client)
                 st.rerun()
 
-# [로직] 사이드바 닫기 트리거 확인 및 실행
 if st.session_state.get('close_sidebar'):
     close_sidebar()
     st.session_state['close_sidebar'] = False
@@ -248,7 +250,8 @@ if 'mode' not in st.session_state: st.session_state['mode'] = 'setup'
 if st.session_state['mode'] == 'setup':
     st.title("Welcome to Syntax Pitching™")
     if url_student:
-        st.markdown(f"### {url_student}님, 환영합니다!\n왼쪽에서 챕터를 선택하고 훈련을 시작하세요.")
+        # [수정] 띄어쓰기 및 손가락 이모지(👈) 추가
+        st.markdown(f"### {url_student} 님, 환영합니다!\n👈 왼쪽에서 챕터를 선택하고 훈련을 시작하세요.")
     else:
         st.markdown("### 👈 왼쪽 사이드바에서 수강생을 선택해주세요.")
     
@@ -265,8 +268,6 @@ elif st.session_state['mode'] == 'playing':
 
     if idx < len(playlist):
         current_img_path = playlist[idx]
-        
-        # [수정] 공통 함수로 이미지 출력
         display_responsive_image(current_img_path, is_grid=False)
 
         col1, col2 = st.columns(2)
@@ -322,9 +323,7 @@ elif st.session_state['mode'] == 'records':
         cols = st.columns(3)
         for i, img_path in enumerate(imgs):
             with cols[i % 3]:
-                # [수정] 기록 화면에서도 비율 유지 로직 적용 (is_grid=True)
                 display_responsive_image(img_path, is_grid=True)
-                
                 avg, history = calculate_batting_average(st.session_state['db_data'], st.session_state['student_name'], img_path)
                 color = "green" if avg >= 0.8 else "orange" if avg >= 0.5 else "red"
                 hist_str = " ".join([f"{h}" for h in history])
