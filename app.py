@@ -12,81 +12,22 @@ import streamlit.components.v1 as components
 # ==========================================
 # [설정] 기본 경로 및 구글 시트
 # ==========================================
-st.set_page_config(page_title="Syntax Pitching", page_icon="⚾", layout="wide")
+st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# ==========================================
-# [중요] 홈 화면 아이콘 강제 적용 (HTML 주입)
-# ==========================================
-def inject_mobile_meta_tags():
-    icon_path = "icon.png"
-    icon_base64 = ""
-    
-    if os.path.exists(icon_path):
-        with open(icon_path, "rb") as image_file:
-            icon_base64 = base64.b64encode(image_file.read()).decode()
-            
-    if icon_base64:
-        apple_touch_icon = f'<link rel="apple-touch-icon" href="data:image/png;base64,{icon_base64}">'
-        shortcut_icon = f'<link rel="shortcut icon" href="data:image/png;base64,{icon_base64}">'
-    else:
-        apple_touch_icon = '<link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/25/25694.png">'
-        shortcut_icon = '<link rel="shortcut icon" href="https://cdn-icons-png.flaticon.com/512/25/25694.png">'
-
-    meta_tags = f"""
-    <head>
-        <meta name="apple-mobile-web-app-title" content="Syntax Pitching">
-        <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-status-bar-style" content="default">
-        {apple_touch_icon}
-        {shortcut_icon}
-    </head>
-    """
-    st.markdown(meta_tags, unsafe_allow_html=True)
-
-inject_mobile_meta_tags()
-
-# [CSS] 스타일 설정
+# [CSS] 스타일 설정 (모바일 최적화 및 계층 구조 유지)
 st.markdown("""
     <style>
-        /* =========================================
-           [스텔스 모드 V2] 정밀 타격
-           ========================================= */
-        
-        /* 1. 상단 햄버거 메뉴(점 3개)만 콕 집어서 숨기기 */
-        #MainMenu {visibility: hidden;}
-        [data-testid="stMainMenu"] {visibility: hidden;}
-        
-        /* 2. 하단 푸터 강력하게 숨기기 */
-        footer {visibility: hidden; display: none !important;}
-        
-        /* 3. 상단 컬러바(데코레이션) 숨기기 */
-        [data-testid="stDecoration"] {visibility: hidden; display: none !important;}
-
-        /* [중요] 헤더 자체는 살려둬야 사이드바 버튼이 보임 */
-        /* 대신 배경을 투명하게 해서 위화감 없애기 */
-        [data-testid="stHeader"] {
-            background-color: transparent !important;
-        }
-
-        /* 4. 클라우드 배지(빨간색) 숨기기 시도 (Viewer Badge) */
-        .viewerBadge_container__1QSob {display: none !important;}
-        [data-testid="stStatusWidget"] {visibility: hidden;}
-
-        /* =========================================
-           [기본 UI 스타일]
-           ========================================= */
-
-        /* 기본 폰트 설정 (전역) */
+        /* 1. 기본 폰트 설정 (전역) */
         .stApp, .stMarkdown, p, h1, h2, h3, h4, div[data-testid="stMarkdownContainer"] {
             font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans KR", sans-serif !important;
         }
         
-        /* 배경색 */
+        /* 2. 배경색 */
         .stApp { background-color: #F0F2F6; }
         [data-testid="stSidebar"] { background-color: #E0E2E6; }
         .stButton>button { border-radius: 8px; font-weight: 500; }
 
-        /* 데스크탑 스타일 (기본) */
+        /* 3. 데스크탑 스타일 (기본) */
         .sidebar-title {
             font-size: 28px;
             font-weight: 700;
@@ -99,7 +40,7 @@ st.markdown("""
             font-size: 14px;
         }
 
-        /* [모바일 최적화] */
+        /* 4. [모바일 최적화] 768px 이하에서 계급별 크기 차등 적용 */
         @media only screen and (max-width: 768px) {
             h1 { font-size: 32px !important; font-weight: 700 !important; line-height: 1.3 !important; }
             h3 { font-size: 20px !important; font-weight: 600 !important; margin-top: 10px !important; }
@@ -255,6 +196,7 @@ if all_students_info:
         match = [s for s in all_students_info if s[1] == url_student]
         if match:
             selected_data = match[0]
+            # [수정] 박스 제거, 깔끔한 텍스트 유지
             st.sidebar.markdown(f'<div style="font-size: 20px; font-weight: 600; margin-bottom: 20px; color: #333;">{url_student} 님</div>', unsafe_allow_html=True)
         else:
             st.sidebar.error(f"'{url_student}' 미등록")
