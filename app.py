@@ -13,7 +13,7 @@ import base64
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [업데이트] CSS: 모바일에서만 폰트 크기를 '적당히' 줄여주는 코드 재적용
+# [업데이트] CSS: 모바일 텍스트 계층 구조(비율) 복구
 st.markdown("""
     <style>
         /* 1. 기본 폰트 설정 (아이콘 제외) */
@@ -39,29 +39,40 @@ st.markdown("""
             font-size: 14px;
         }
 
-        /* 4. [모바일 최적화] 화면이 좁을 때만(768px 이하) 글자 크기 70%로 조정 */
+        /* 4. [모바일 최적화] 화면이 좁을 때(768px 이하) 비율에 맞춰 크기 차등 적용 */
         @media only screen and (max-width: 768px) {
-            /* 제목: 너무 작지 않게 22px 정도로 */
-            h1 { font-size: 22px !important; }
-            /* 중간 제목 */
-            h3 { font-size: 18px !important; }
-            /* 본문 텍스트 */
-            p, div, span, label { font-size: 14px !important; }
             
-            /* 사이드바 제목 */
+            /* (Level 1) 메인 타이틀: 확실히 크게 */
+            h1 { 
+                font-size: 30px !important; 
+                line-height: 1.3 !important;
+            }
+            
+            /* (Level 2) 중간 제목 (안내 문구 등): 본문보다 약간 크게 */
+            h3 { 
+                font-size: 18px !important; 
+                margin-top: 10px !important;
+            }
+            
+            /* (Level 2.5) 일반 본문 텍스트 */
+            p, div, span, label { 
+                font-size: 15px !important; 
+            }
+            
+            /* 사이드바 제목: 적당한 크기로 */
             .sidebar-title {
-                font-size: 20px !important; 
-                margin-bottom: 10px !important;
+                font-size: 22px !important; 
+                margin-bottom: 15px !important;
             }
             
-            /* 푸터 (Powered by...) */
+            /* (Level 3) 푸터: 작게 유지 (기준점) */
             .footer-text {
-                font-size: 11px !important;
+                font-size: 12px !important;
             }
             
-            /* 버튼 글씨 크기 */
+            /* 버튼 글씨: 터치하기 좋게 유지 */
             .stButton>button {
-                font-size: 14px !important;
+                font-size: 16px !important;
             }
         }
     </style>
