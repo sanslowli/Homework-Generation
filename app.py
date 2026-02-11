@@ -6,22 +6,61 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import pandas as pd
 from PIL import Image
+import base64 # [추가] 이미지를 HTML로 직접 렌더링하기 위해 필요
 
 # ==========================================
 # [설정] 기본 경로 및 구글 시트
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [수정] 아이콘 폰트 깨짐 방지를 위해 CSS 적용 대상 축소
+# [업데이트] CSS: 모바일 폰트 조절 및 줄바꿈 방지, 아이콘 보호
 st.markdown("""
     <style>
-        /* span, label 등 아이콘에 영향을 주는 태그 제외 */
+        /* 기본 폰트 설정 (아이콘 제외) */
         .stApp, .stMarkdown, p, h1, h2, h3, h4, div[data-testid="stMarkdownContainer"] {
             font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans KR", sans-serif !important;
         }
+        
+        /* 배경색 */
         .stApp { background-color: #F0F2F6; }
         [data-testid="stSidebar"] { background-color: #E0E2E6; }
         .stButton>button { border-radius: 8px; font-weight: 500; }
+
+        /* [모바일 최적화] 화면 너비가 768px 이하일 때 적용 */
+        @media only screen and (max-width: 768px) {
+            /* 제목 크기 대폭 축소 */
+            h1 { font-size: 24px !important; }
+            h3 { font-size: 18px !important; }
+            p, div, span { font-size: 14px !important; }
+            
+            /* 사이드바 제목 줄바꿈 방지 및 크기 조절 */
+            .sidebar-title {
+                font-size: 18px !important;
+                white-space: nowrap !important;
+                overflow: hidden !important;
+                text-overflow: ellipsis !important;
+            }
+            
+            /* 푸터 줄바꿈 방지 */
+            .footer-text {
+                font-size: 11px !important;
+                white-space: nowrap !important;
+            }
+        }
+
+        /* 데스크탑 사이드바 제목 */
+        .sidebar-title {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: #31333F;
+        }
+        
+        /* 푸터 스타일 */
+        .footer-text {
+            color: #888;
+            margin-top: 20px;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -60,6 +99,11 @@ def save_to_sheet(client, student, chapter, image, result):
         st.cache_data.clear() 
     except Exception as e:
         st.error(f"데이터 저장 실패: {e}")
+
+# [NEW] 이미지를 Base64 문자열로 변환 (HTML 렌더링용)
+def get_image_base64(image_path):
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode()
 
 # ==========================================
 # [로직] 탐색 및 통계
@@ -111,7 +155,9 @@ def calculate_batting_average(df, student, image_path):
 # [화면] 사이드바
 # ==========================================
 client = init_connection()
-st.sidebar.title("Syntax Pitching™")
+
+# [수정] 사이드바 제목을 st.title 대신 HTML로 커스텀 (폰트 제어 및 줄바꿈 방지)
+st.sidebar.markdown('<div class="sidebar-title">Syntax Pitching™</div>', unsafe_allow_html=True)
 
 query_params = st.query_params
 url_student = query_params.get("student")
@@ -168,7 +214,9 @@ if st.session_state['mode'] == 'setup':
         st.markdown(f"### {url_student}님, 환영합니다!\n왼쪽에서 챕터를 선택하고 훈련을 시작하세요.")
     else:
         st.markdown("### 👈 왼쪽 사이드바에서 수강생을 선택해주세요.")
-    st.caption("© Powered by Kusukban | All Rights Reserved.")
+    
+    # [수정] 줄바꿈 방지 클래스 적용
+    st.markdown('<div class="footer-text">© Powered by Kusukban | All Rights Reserved.</div>', unsafe_allow_html=True)
 
 elif st.session_state['mode'] == 'playing':
     playlist = st.session_state['playlist']
@@ -182,29 +230,32 @@ elif st.session_state['mode'] == 'playing':
     if idx < len(playlist):
         current_img_path = playlist[idx]
         
-        # [수정] 이미지 비율 로직 (제동 장치 제거)
+        # [수정] HTML 렌더링으로 이미지 비율 완벽 통제 (모바일 Stacking 방지)
         try:
             abs_path = os.path.abspath(current_img_path)
             img = Image.open(abs_path)
             w, h = img.size
             actual_ratio = w / h
-            target_ratio = (3 * 2.69) / 2.45 # 약 3.29
+            target_ratio = (3 * 2.69) / 2.45 # 약 3.29 (3칸 기준 비율)
 
-            # 비율이 기준보다 크면(더 납작하면) 꽉 채움
-            if actual_ratio >= target_ratio:
-                st.image(abs_path, use_container_width=True)
-            else:
-                # [중요] 제동 장치 없이 순수 비율대로 여백 계산
-                img_share = actual_ratio / target_ratio
-                padding = (1 - img_share) / 2
-                
-                # Streamlit의 모바일 특성상 columns가 좁아지면 강제로 stack될 수 있음
-                # 하지만 일단 요청하신 대로 '비율 계산값'을 그대로 밀어넣습니다.
-                cols = st.columns([padding, img_share, padding])
-                with cols[1]:
-                    st.image(abs_path, use_container_width=True)
+            # 너비 비율 계산 (최대 100%)
+            width_pct = min(100, (actual_ratio / target_ratio) * 100)
+            
+            # 2칸짜리(약 66%) 등이 너무 작아 보이지 않도록 최소값 보정 (선택 사항, 현재는 정직하게 적용)
+            # 만약 너무 작다면 width_pct = max(width_pct, 40) 같은 로직 추가 가능
+            
+            img_b64 = get_image_base64(abs_path)
+            
+            # HTML로 중앙 정렬하여 이미지 출력
+            html_code = f"""
+            <div style="display: flex; justify-content: center; width: 100%;">
+                <img src="data:image/png;base64,{img_b64}" style="width: {width_pct}%; max-width: 100%; height: auto; border-radius: 5px;">
+            </div>
+            """
+            st.markdown(html_code, unsafe_allow_html=True)
+
         except Exception as e:
-            # 에러 시 그냥 원본 출력
+            st.error(f"Image Error: {e}")
             st.image(current_img_path, use_container_width=True)
 
         col1, col2 = st.columns(2)
