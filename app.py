@@ -7,27 +7,22 @@ from datetime import datetime
 import pandas as pd
 from PIL import Image
 import base64
-import streamlit.components.v1 as components
 
 # ==========================================
 # [설정] 기본 경로 및 구글 시트
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [CSS] 스타일 설정 (모바일 최적화 및 계층 구조 유지)
+# [CSS] 스타일 설정
 st.markdown("""
     <style>
-        /* 1. 기본 폰트 설정 (전역) */
         .stApp, .stMarkdown, p, h1, h2, h3, h4, div[data-testid="stMarkdownContainer"] {
             font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans KR", sans-serif !important;
         }
-        
-        /* 2. 배경색 */
         .stApp { background-color: #F0F2F6; }
         [data-testid="stSidebar"] { background-color: #E0E2E6; }
         .stButton>button { border-radius: 8px; font-weight: 500; }
 
-        /* 3. 데스크탑 스타일 (기본) */
         .sidebar-title {
             font-size: 28px;
             font-weight: 700;
@@ -40,7 +35,6 @@ st.markdown("""
             font-size: 14px;
         }
 
-        /* 4. [모바일 최적화] 768px 이하에서 계급별 크기 차등 적용 */
         @media only screen and (max-width: 768px) {
             h1 { font-size: 32px !important; font-weight: 700 !important; line-height: 1.3 !important; }
             h3 { font-size: 20px !important; font-weight: 600 !important; margin-top: 10px !important; }
@@ -118,23 +112,6 @@ def display_responsive_image(image_path, is_grid=False):
         st.error(f"Img Error: {e}")
         st.image(image_path, use_container_width=True)
 
-# [수정] 자바스크립트에 0.1초 딜레이 추가하여 버튼 늘어남 현상 방지
-def close_sidebar():
-    js = """
-    <script>
-        setTimeout(function() {
-            var sidebar = window.parent.document.querySelector('section[data-testid="stSidebar"]');
-            if (sidebar) {
-                var collapseBtn = sidebar.querySelector('button');
-                if (collapseBtn) {
-                    collapseBtn.click();
-                }
-            }
-        }, 100);
-    </script>
-    """
-    st.components.v1.html(js, height=0, width=0)
-
 # ==========================================
 # [로직] 탐색 및 통계
 # ==========================================
@@ -199,7 +176,6 @@ if all_students_info:
         match = [s for s in all_students_info if s[1] == url_student]
         if match:
             selected_data = match[0]
-            # [수정] 깔끔한 이름 표시 (박스 제거)
             st.sidebar.markdown(f'<div style="font-size: 20px; font-weight: 600; margin-bottom: 20px; color: #333;">{url_student} 님</div>', unsafe_allow_html=True)
         else:
             st.sidebar.error(f"'{url_student}' 미등록")
@@ -219,8 +195,7 @@ if all_students_info:
                     'chapter_path': selected_chapter_data[0], 'chapter_name': selected_chapter_data[1],
                     'original_playlist': get_images(folder_name, student_name, selected_chapter_data[0]),
                     'playlist': random.sample(get_images(folder_name, student_name, selected_chapter_data[0]), len(get_images(folder_name, student_name, selected_chapter_data[0]))),
-                    'current_index': 0, 'results': [], 'is_practice_mode': False, 'mode': 'playing',
-                    'close_sidebar': True
+                    'current_index': 0, 'results': [], 'is_practice_mode': False, 'mode': 'playing'
                 })
                 if client: st.session_state['db_data'] = get_data_from_sheet(client)
                 st.rerun()
@@ -229,15 +204,10 @@ if all_students_info:
                 st.session_state.update({
                     'folder_name': folder_name, 'student_name': student_name,
                     'chapter_path': selected_chapter_data[0], 'chapter_name': selected_chapter_data[1],
-                    'mode': 'records',
-                    'close_sidebar': True
+                    'mode': 'records'
                 })
                 if client: st.session_state['db_data'] = get_data_from_sheet(client)
                 st.rerun()
-
-if st.session_state.get('close_sidebar'):
-    close_sidebar()
-    st.session_state['close_sidebar'] = False
 
 # ==========================================
 # [화면] 메인 로직
@@ -250,7 +220,6 @@ if st.session_state['mode'] == 'setup':
         st.markdown(f"### {url_student} 님, 환영합니다!\n👈 왼쪽에서 챕터를 선택하고 훈련을 시작하세요.")
     else:
         st.markdown("### 👈 왼쪽 사이드바에서 수강생을 선택해주세요.")
-    
     st.markdown('<div class="footer-text">© Powered by Kusukban | All Rights Reserved.</div>', unsafe_allow_html=True)
 
 elif st.session_state['mode'] == 'playing':
