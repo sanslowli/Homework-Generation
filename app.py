@@ -13,31 +13,56 @@ import base64
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [수정] 모바일 폰트 강제 축소(@media) 제거 -> 자연스러운 크기 유지
+# [업데이트] CSS: 모바일에서만 폰트 크기를 '적당히' 줄여주는 코드 재적용
 st.markdown("""
     <style>
-        /* 기본 폰트 설정 (아이콘 제외) */
+        /* 1. 기본 폰트 설정 (아이콘 제외) */
         .stApp, .stMarkdown, p, h1, h2, h3, h4, div[data-testid="stMarkdownContainer"] {
             font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans KR", sans-serif !important;
         }
         
-        /* 배경색 */
+        /* 2. 배경색 */
         .stApp { background-color: #F0F2F6; }
         [data-testid="stSidebar"] { background-color: #E0E2E6; }
         .stButton>button { border-radius: 8px; font-weight: 500; }
 
-        /* 데스크탑/모바일 공통 사이드바 제목 스타일 */
+        /* 3. 데스크탑 기본 스타일 */
         .sidebar-title {
             font-size: 28px;
             font-weight: 700;
             margin-bottom: 20px;
             color: #31333F;
         }
-        
-        /* 푸터 스타일 */
         .footer-text {
             color: #888;
             margin-top: 20px;
+            font-size: 14px;
+        }
+
+        /* 4. [모바일 최적화] 화면이 좁을 때만(768px 이하) 글자 크기 70%로 조정 */
+        @media only screen and (max-width: 768px) {
+            /* 제목: 너무 작지 않게 22px 정도로 */
+            h1 { font-size: 22px !important; }
+            /* 중간 제목 */
+            h3 { font-size: 18px !important; }
+            /* 본문 텍스트 */
+            p, div, span, label { font-size: 14px !important; }
+            
+            /* 사이드바 제목 */
+            .sidebar-title {
+                font-size: 20px !important; 
+                margin-bottom: 10px !important;
+            }
+            
+            /* 푸터 (Powered by...) */
+            .footer-text {
+                font-size: 11px !important;
+            }
+            
+            /* 버튼 글씨 크기 */
+            .stButton>button {
+                font-size: 14px !important;
+            }
         }
     </style>
     """, unsafe_allow_html=True)
@@ -213,7 +238,6 @@ elif st.session_state['mode'] == 'playing':
             actual_ratio = w / h
             target_ratio = (3 * 2.69) / 2.45
 
-            # 너비 비율 계산 (최대 100%)
             width_pct = min(100, (actual_ratio / target_ratio) * 100)
             img_b64 = get_image_base64(abs_path)
             
