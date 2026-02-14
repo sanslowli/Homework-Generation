@@ -1,24 +1,16 @@
-# 1. 일단 싹 다 무시해 (기본값: 차단)
-*
+# 1. 맥(Mac) 시스템 찌꺼기 영구 차단 (아까 에러 완벽 복원)
+.DS_Store
+**/.DS_Store
 
-# 2. 하지만 이 파일들은 꼭 챙겨 (앱 구동 필수품)
-!*.py
-!requirements.txt
-!.gitignore
-
-# 3. VIP 폴더 3개는 통째로 챙겨 (이 안의 이미지는 자동 통과됨)
-!Syntax Pitching/**
-!Syntax Only/**
-!Syntax + Open-ended Question/**
-
-# 4. [중요] VIP 폴더 안에 있더라도 이건 절대 가져가지 마
+# 2. 무거운 영상/압축 파일 차단 (깃허브 용량 초과 방지)
 *.mp4
 *.mov
 *.zip
-.DS_Store
+
+# 3. 절대 올라가면 안 되는 보안 파일 차단
 service_key.json
-.DS_Store
-.DS_Store
-.DS_Store
-.DS_Store
-.DS_Store
+
+# 4. 파이썬 캐시 파일 차단 (앱 구동시 생기는 찌꺼기)
+__pycache__/
+*.pyc
+*.pyo
