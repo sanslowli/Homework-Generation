@@ -1,0 +1,40 @@
+{
+    "남강순": {
+        "501S/1-3.png": {
+            "recent_history": [
+                "O",
+                "X"
+            ],
+            "total_attempts": 2,
+            "batting_average": 0.5,
+            "last_played": "2026-02-17 11:39:24"
+        },
+        "501S/1-4.png": {
+            "recent_history": [
+                "O",
+                "X"
+            ],
+            "total_attempts": 2,
+            "batting_average": 0.5,
+            "last_played": "2026-02-17 11:39:24"
+        },
+        "501S/1-2.png": {
+            "recent_history": [
+                "O",
+                "X"
+            ],
+            "total_attempts": 2,
+            "batting_average": 0.5,
+            "last_played": "2026-02-17 11:39:25"
+        },
+        "501S/1-1.png": {
+            "recent_history": [
+                "O",
+                "X"
+            ],
+            "total_attempts": 2,
+            "batting_average": 0.5,
+            "last_played": "2026-02-17 11:39:23"
+        }
+    }
+}
