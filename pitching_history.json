@@ -78,5 +78,39 @@
             "batting_average": 0.33,
             "last_played": "2026-02-19 12:50:02"
         }
+    },
+    "김예원": {
+        "501/1-2.png": {
+            "recent_history": [
+                "O"
+            ],
+            "total_attempts": 1,
+            "batting_average": 1.0,
+            "last_played": "2026-02-20 21:00:34"
+        },
+        "501/1-3.png": {
+            "recent_history": [
+                "X"
+            ],
+            "total_attempts": 1,
+            "batting_average": 0.0,
+            "last_played": "2026-02-20 21:00:36"
+        },
+        "501/1-4.png": {
+            "recent_history": [
+                "O"
+            ],
+            "total_attempts": 1,
+            "batting_average": 1.0,
+            "last_played": "2026-02-20 21:00:36"
+        },
+        "501/1-1.png": {
+            "recent_history": [
+                "X"
+            ],
+            "total_attempts": 1,
+            "batting_average": 0.0,
+            "last_played": "2026-02-20 21:00:37"
+        }
     }
 }
