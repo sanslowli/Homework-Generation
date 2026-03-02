@@ -13,18 +13,21 @@ import base64
 # ==========================================
 st.set_page_config(page_title="Syntax Pitching™", layout="wide")
 
-# [CSS] 스타일 설정 (다크모드/라이트모드 자동 지원을 위해 강제 배경색 제거)
+# [CSS] 스타일 설정
 st.markdown("""
     <style>
         .stApp, .stMarkdown, p, h1, h2, h3, h4, div[data-testid="stMarkdownContainer"] {
             font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans KR", sans-serif !important;
         }
+        .stApp { background-color: #F0F2F6; }
+        [data-testid="stSidebar"] { background-color: #E0E2E6; }
         .stButton>button { border-radius: 8px; font-weight: 500; }
 
         .sidebar-title {
             font-size: 28px;
             font-weight: 700;
             margin-bottom: 20px;
+            color: #31333F;
         }
         .footer-text {
             color: #888;
@@ -173,7 +176,7 @@ if all_students_info:
         match = [s for s in all_students_info if s[1] == url_student]
         if match:
             selected_data = match[0]
-            st.sidebar.markdown(f'<div style="font-size: 20px; font-weight: 600; margin-bottom: 20px;">{url_student} 님</div>', unsafe_allow_html=True)
+            st.sidebar.markdown(f'<div style="font-size: 20px; font-weight: 600; margin-bottom: 20px; color: #333;">{url_student} 님</div>', unsafe_allow_html=True)
         else:
             st.sidebar.error(f"'{url_student}' 미등록")
             selected_data = st.sidebar.selectbox("수강생 선택", all_students_info, format_func=lambda x: x[1])
@@ -184,6 +187,7 @@ if all_students_info:
         folder_name, student_name = selected_data
         chapter_list = get_chapters(folder_name, student_name)
         if chapter_list:
+            # 단일 선택(selectbox)에서 복수 선택(multiselect)으로 변경
             selected_chapters = st.sidebar.multiselect("챕터 선택 (복수 선택 가능)", chapter_list, format_func=lambda x: x[1])
             
             if st.sidebar.button("훈련 시작 (Start)", use_container_width=True) and selected_chapters:
@@ -196,7 +200,7 @@ if all_students_info:
                 st.session_state.update({
                     'folder_name': folder_name, 
                     'student_name': student_name,
-                    'selected_chapters': selected_chapters, 
+                    'selected_chapters': selected_chapters, # 복수 챕터 정보 저장
                     'original_playlist': all_images.copy(),
                     'playlist': all_images,
                     'current_index': 0, 
@@ -241,6 +245,7 @@ elif st.session_state['mode'] == 'playing':
 
     if idx < len(playlist):
         current_img_path = playlist[idx]
+        # 현재 띄워진 이미지의 진짜 소속 챕터(폴더명)를 동적 추출
         current_chapter = os.path.basename(os.path.dirname(current_img_path))
         
         display_responsive_image(current_img_path, is_grid=False)
