@@ -187,35 +187,23 @@ if all_students_info:
         folder_name, student_name = selected_data
         chapter_list = get_chapters(folder_name, student_name)
         if chapter_list:
-            # 단일 선택(selectbox)에서 복수 선택(multiselect)으로 변경
-            selected_chapters = st.sidebar.multiselect("챕터 선택 (복수 선택 가능)", chapter_list, format_func=lambda x: x[1])
+            selected_chapter_data = st.sidebar.selectbox("챕터 선택", chapter_list, format_func=lambda x: x[1])
             
-            if st.sidebar.button("훈련 시작 (Start)", use_container_width=True) and selected_chapters:
-                all_images = []
-                for ch_path, ch_name in selected_chapters:
-                    all_images.extend(get_images(folder_name, student_name, ch_path))
-                
-                random.shuffle(all_images)
-                
+            if st.sidebar.button("훈련 시작 (Start)", use_container_width=True):
                 st.session_state.update({
-                    'folder_name': folder_name, 
-                    'student_name': student_name,
-                    'selected_chapters': selected_chapters, # 복수 챕터 정보 저장
-                    'original_playlist': all_images.copy(),
-                    'playlist': all_images,
-                    'current_index': 0, 
-                    'results': [], 
-                    'is_practice_mode': False, 
-                    'mode': 'playing'
+                    'folder_name': folder_name, 'student_name': student_name,
+                    'chapter_path': selected_chapter_data[0], 'chapter_name': selected_chapter_data[1],
+                    'original_playlist': get_images(folder_name, student_name, selected_chapter_data[0]),
+                    'playlist': random.sample(get_images(folder_name, student_name, selected_chapter_data[0]), len(get_images(folder_name, student_name, selected_chapter_data[0]))),
+                    'current_index': 0, 'results': [], 'is_practice_mode': False, 'mode': 'playing'
                 })
                 if client: st.session_state['db_data'] = get_data_from_sheet(client)
                 st.rerun()
 
-            if st.sidebar.button("피칭 기록 보기", use_container_width=True) and selected_chapters:
+            if st.sidebar.button("피칭 기록 보기", use_container_width=True):
                 st.session_state.update({
-                    'folder_name': folder_name, 
-                    'student_name': student_name,
-                    'selected_chapters': selected_chapters,
+                    'folder_name': folder_name, 'student_name': student_name,
+                    'chapter_path': selected_chapter_data[0], 'chapter_name': selected_chapter_data[1],
                     'mode': 'records'
                 })
                 if client: st.session_state['db_data'] = get_data_from_sheet(client)
@@ -245,23 +233,18 @@ elif st.session_state['mode'] == 'playing':
 
     if idx < len(playlist):
         current_img_path = playlist[idx]
-        # 현재 띄워진 이미지의 진짜 소속 챕터(폴더명)를 동적 추출
-        current_chapter = os.path.basename(os.path.dirname(current_img_path))
-        
         display_responsive_image(current_img_path, is_grid=False)
 
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🙅 미통과", key='fail', use_container_width=True):
-                if not is_practice and client: 
-                    save_to_sheet(client, st.session_state['student_name'], current_chapter, os.path.basename(current_img_path), "X")
+                if not is_practice and client: save_to_sheet(client, st.session_state['student_name'], st.session_state['chapter_name'], os.path.basename(current_img_path), "X")
                 st.session_state['results'].append({'file': current_img_path, 'result': 'X'})
                 st.session_state['current_index'] += 1
                 st.rerun()
         with col2:
             if st.button("🙆 통과", key='pass', use_container_width=True):
-                if not is_practice and client: 
-                    save_to_sheet(client, st.session_state['student_name'], current_chapter, os.path.basename(current_img_path), "O")
+                if not is_practice and client: save_to_sheet(client, st.session_state['student_name'], st.session_state['chapter_name'], os.path.basename(current_img_path), "O")
                 st.session_state['results'].append({'file': current_img_path, 'result': 'O'})
                 st.session_state['current_index'] += 1
                 st.rerun()
@@ -297,17 +280,13 @@ elif st.session_state['mode'] == 'playing':
                 if st.button("처음으로", use_container_width=True): st.session_state['mode'] = 'setup'; st.rerun()
 
 elif st.session_state['mode'] == 'records':
-    chapter_names = ", ".join([ch_name for ch_path, ch_name in st.session_state['selected_chapters']])
-    st.title(f"피칭 기록: {st.session_state['student_name']} - {chapter_names}")
+    st.title(f"피칭 기록: {st.session_state['student_name']} - {st.session_state['chapter_name']}")
     if st.button("뒤로가기"): st.session_state['mode'] = 'setup'; st.rerun()
     
-    all_imgs = []
-    for ch_path, ch_name in st.session_state['selected_chapters']:
-        all_imgs.extend(get_images(st.session_state['folder_name'], st.session_state['student_name'], ch_path))
-        
-    if all_imgs and 'db_data' in st.session_state:
+    imgs = get_images(st.session_state['folder_name'], st.session_state['student_name'], st.session_state['chapter_path'])
+    if imgs and 'db_data' in st.session_state:
         cols = st.columns(3)
-        for i, img_path in enumerate(all_imgs):
+        for i, img_path in enumerate(imgs):
             with cols[i % 3]:
                 display_responsive_image(img_path, is_grid=True)
                 avg, history = calculate_batting_average(st.session_state['db_data'], st.session_state['student_name'], img_path)
