@@ -39,7 +39,7 @@ BASE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 TARGET_FOLDERS = ["Syntax Pitching", "Syntax Only", "Syntax + Open-ended Question"]
 ALLOWED_SUBFOLDERS = ["현행 챕터", "지난 챕터"]
 SHEET_NAME = "Syntax Pitching DB"
-FONT_PATH = os.path.join(BASE_FOLDER, "font.ttf") # 폰트 파일 경로
+FONT_PATH = os.path.join(BASE_FOLDER, "font.ttf")
 
 @st.cache_resource
 def init_connection():
@@ -88,9 +88,7 @@ def get_random_question(client, student_name):
             asked_qs = [row[2] for row in all_rows[1:] if len(row) >= 3 and row[1] == student_name]
             
         available_qs = [q for q in all_qs if q not in asked_qs]
-        
-        if not available_qs:
-            available_qs = all_qs 
+        if not available_qs: available_qs = all_qs 
             
         selected_q = random.choice(available_qs)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -198,39 +196,35 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
         student_data = db_df[db_df['Student'] == student_name]
         counts = student_data['Image'].value_counts().to_dict()
         
-    def get_count(img_path):
-        return counts.get(os.path.basename(img_path), 0)
-        
+    def get_count(img_path): return counts.get(os.path.basename(img_path), 0)
     random.shuffle(all_imgs) 
     all_imgs.sort(key=get_count) 
-    
     return all_imgs[:n]
 
 # ==========================================
-# [로직] 결과 인증 이미지 생성 (3열 레이아웃 개편)
+# [로직] 결과 인증 이미지 생성 (디자인 전면 개편)
 # ==========================================
-def hex_to_rgb(hex_str):
-    h = hex_str.lstrip('#')
-    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-
 def get_label_bg_rgba(label_text: str):
-    if label_text.startswith('1'): return (214, 82, 75, 160) # RED
-    if label_text.endswith('S'): return (199, 142, 43, 160) # YELLOW
-    return (62, 129, 97, 160) # GREEN
+    if label_text.startswith('1'): return (214, 82, 75, 180) # RED
+    if label_text.endswith('S'): return (199, 142, 43, 180) # YELLOW
+    return (62, 129, 97, 180) # GREEN
 
 def create_summary_image_base64(student_name, results_list, db_df, question_text=None):
-    TARGET_HEIGHT = 140
-    HEADER_HEIGHT = 60
-    COL1_W = 60   # 1열: O/X 공간
-    COL2_W = 160  # 2열: 타율 및 히스토리 공간
+    # 세로 높이 압축 (140 -> 110)
+    TARGET_HEIGHT = 110 
+    HEADER_HEIGHT = 70
+    COL1_W = 60   # O/X 공간
+    COL2_W = 120  # 타율 공간
     
     try:
-        font_header = ImageFont.truetype(FONT_PATH, 30)
-        font_large = ImageFont.truetype(FONT_PATH, 40)
-        font_medium = ImageFont.truetype(FONT_PATH, 20)
-        font_small = ImageFont.truetype(FONT_PATH, 16)
+        font_title = ImageFont.truetype(FONT_PATH, 32)
+        font_ox = ImageFont.truetype(FONT_PATH, 36)
+        font_stat_pct = ImageFont.truetype(FONT_PATH, 18)
+        font_stat_hist = ImageFont.truetype(FONT_PATH, 14)
+        font_label = ImageFont.truetype(FONT_PATH, 13)
+        font_q = ImageFont.truetype(FONT_PATH, 24)
     except:
-        font_header = font_large = font_medium = font_small = ImageFont.load_default()
+        font_title = font_ox = font_stat_pct = font_stat_hist = font_label = font_q = ImageFont.load_default()
 
     row_data = []
     max_img_w = 0
@@ -238,10 +232,9 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
         p = r['file']
         res = r['result']
         
-        # 최신 타율 계산 (방금 한 피칭 결과 포함)
         _, hist = calculate_batting_average(db_df, student_name, p)
         hist.append(res)
-        hist = hist[-5:] # 최근 5개만 유지
+        hist = hist[-5:] 
         avg = hist.count('O') / len(hist)
         
         try:
@@ -259,26 +252,40 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             if new_w > max_img_w: max_img_w = new_w
         except: continue
 
-    TOTAL_WIDTH = max(COL1_W + COL2_W + max_img_w, 600)
-    rows = len(row_data) + (1 if question_text else 0)
-    TOTAL_HEIGHT = HEADER_HEIGHT + TARGET_HEIGHT * rows
+    # 가로 폭 넉넉하게 확보
+    TOTAL_WIDTH = max(COL1_W + COL2_W + max_img_w + 30, 800) 
+    
+    # 질문 박스 높이 동적 계산 (가로 폭 꽉 차게 75글자 제한)
+    q_lines = []
+    q_height = 0
+    if question_text:
+        wrapped = textwrap.fill(question_text, width=75)
+        q_lines = wrapped.split('\n')
+        q_height = max(100, len(q_lines) * 35 + 50) 
+
+    rows = len(row_data)
+    TOTAL_HEIGHT = HEADER_HEIGHT + (TARGET_HEIGHT * rows) + q_height + 20
 
     final_image = Image.new("RGB", (TOTAL_WIDTH, TOTAL_HEIGHT), "white")
     draw = ImageDraw.Draw(final_image)
     
     today_display = datetime.today().strftime('%m/%d').lstrip("0").replace("/0", "/")
-    draw.text((20, 15), f"{student_name} {today_display} 숙제 완료", fill="black", font=font_header)
+    title_text = f"{student_name} {today_display} Daily Pitching Record"
+    draw.text((20, 20), title_text, fill="#2C3E50", font=font_title)
 
     y_offset = HEADER_HEIGHT
     for item in row_data:
-        # 1열: O/X 표시
-        res_color = "#3E8161" if item['res'] == 'O' else "#D6524B"
-        draw.text((15, y_offset + 45), item['res'], fill=res_color, font=font_large)
+        # 수직 중앙 정렬을 위한 좌표 계산
+        center_y = y_offset + (TARGET_HEIGHT // 2)
         
-        # 2열: 타율 및 기록
+        # 1열: O/X 표시 (모던한 색상 적용)
+        res_color = "#27AE60" if item['res'] == 'O' else "#E74C3C"
+        draw.text((15, center_y - 20), item['res'], fill=res_color, font=font_ox)
+        
+        # 2열: 타율 및 기록 (위아래 예쁘게 배치)
         hist_str = " ".join(item['hist'])
-        avg_str = f"{int(item['avg']*100)}%\n{hist_str}"
-        draw.text((COL1_W, y_offset + 45), avg_str, fill="#333333", font=font_medium)
+        draw.text((COL1_W + 5, center_y - 18), f"{int(item['avg']*100)}%", fill="#34495E", font=font_stat_pct)
+        draw.text((COL1_W + 5, center_y + 8), hist_str, fill="#7F8C8D", font=font_stat_hist)
         
         # 3열: 이미지 붙여넣기
         img_x_offset = COL1_W + COL2_W
@@ -287,21 +294,29 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
         # 뱃지 (라벨)
         bg_rgba = get_label_bg_rgba(str(item['label']))
         draw_rect = ImageDraw.Draw(final_image, "RGBA")
-        tw = draw_rect.textlength(str(item['label']), font=font_small)
-        draw_rect.rectangle((img_x_offset, y_offset, img_x_offset + tw + 12, y_offset + 24), fill=bg_rgba)
-        draw_rect.text((img_x_offset + 6, y_offset + 2), str(item['label']), fill="white", font=font_small)
+        tw = draw_rect.textlength(str(item['label']), font=font_label)
+        draw_rect.rectangle((img_x_offset, y_offset, img_x_offset + tw + 10, y_offset + 22), fill=bg_rgba)
+        draw_rect.text((img_x_offset + 5, y_offset + 2), str(item['label']), fill="white", font=font_label)
         
         # 행 구분선 
-        draw.line([(0, y_offset + TARGET_HEIGHT), (TOTAL_WIDTH, y_offset + TARGET_HEIGHT)], fill="#E0E0E0", width=1)
+        draw.line([(20, y_offset + TARGET_HEIGHT), (TOTAL_WIDTH - 20, y_offset + TARGET_HEIGHT)], fill="#ECF0F1", width=1)
         
         y_offset += TARGET_HEIGHT
 
+    # 질문 박스 디자인
     if question_text:
-        wrapped = textwrap.fill(question_text, width=45)
-        draw.text((20, y_offset + 20), wrapped, fill="black", font=font_medium)
+        q_y_start = y_offset + 15
+        # 연한 회색/블루 톤의 둥근 박스 느낌
+        draw.rectangle([(20, q_y_start), (TOTAL_WIDTH - 20, TOTAL_HEIGHT - 20)], fill="#F8F9FA", outline="#E9ECEF", width=1)
+        draw.text((40, q_y_start + 25), "Q.", fill="#3498DB", font=font_title)
+        
+        text_y = q_y_start + 30
+        for line in q_lines:
+            draw.text((85, text_y), line, fill="#2C3E50", font=font_q)
+            text_y += 35
 
     buffered = BytesIO()
-    final_image.save(buffered, format="JPEG")
+    final_image.save(buffered, format="JPEG", quality=95)
     return base64.b64encode(buffered.getvalue()).decode()
 
 # ==========================================
@@ -363,7 +378,7 @@ if st.session_state['mode'] == 'setup':
     if url_student and selected_data:
         st.markdown(f"### {url_student} 님, 환영합니다!")
         
-        # 버튼 사이즈 및 아이콘 등 디테일 수정
+        # 꽉 찬 버튼이 아닌 일반 사이즈 버튼 (왼쪽 정렬)
         if st.button("오늘의 Daily Homework 시작"):
             if client: st.session_state['db_data'] = get_data_from_sheet(client)
             db_df = st.session_state.get('db_data', pd.DataFrame())
@@ -385,7 +400,7 @@ if st.session_state['mode'] == 'setup':
             else:
                 st.warning("출제할 이미지가 없습니다. 폴더 구성을 확인해 주세요.")
         
-        st.write("") # 간격 띄우기
+        st.write("") 
         st.markdown("👈 특정 챕터만 골라서 연습하려면 왼쪽에서 챕터를 선택하세요.")
     else:
         st.markdown("### 👈 왼쪽 사이드바에서 수강생을 선택해주세요.")
@@ -475,12 +490,10 @@ elif st.session_state['mode'] == 'daily_result':
         if "Syntax + Open-ended Question" in st.session_state['folder_name']:
             question = get_random_question(client, st.session_state['student_name'])
         
-        # 이미지 생성 함수 호출 시 DB 데이터도 함께 넘김
         db_df = st.session_state.get('db_data', pd.DataFrame())
         b64_img = create_summary_image_base64(st.session_state['student_name'], results, db_df, question)
         
-        # 이미지 테두리(border) 속성 삭제
-        st.markdown(f'<img src="data:image/jpeg;base64,{b64_img}" style="width:100%; max-width:500px; border-radius:8px;">', unsafe_allow_html=True)
+        st.markdown(f'<img src="data:image/jpeg;base64,{b64_img}" style="width:100%; max-width:600px; border-radius:8px;">', unsafe_allow_html=True)
 
     st.markdown("---")
     c1, c2 = st.columns(2)
