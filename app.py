@@ -72,14 +72,38 @@ def save_to_sheet(client, student, chapter, image, result):
     except Exception as e:
         pass
 
-def get_random_question(client):
+def get_random_question(client, student_name):
     try:
-        sheet = client.open(SHEET_NAME).worksheet("Questions")
-        vals = sheet.col_values(1)
-        valid_vals = [v for v in vals if v.strip()]
-        return random.choice(valid_vals) if valid_vals else None
-    except:
-        return None
+        sheet_questions = client.open(SHEET_NAME).worksheet("Questions")
+        all_qs = [v for v in sheet_questions.col_values(1) if v.strip()]
+        if not all_qs: return None
+
+        sheet_asked = client.open(SHEET_NAME).worksheet("Asked_Questions")
+        all_rows = sheet_asked.get_all_values()
+        
+        if not all_rows:
+            sheet_asked.append_row(["Timestamp", "Student", "Question"])
+            asked_qs = []
+        else:
+            asked_qs = [row[2] for row in all_rows[1:] if len(row) >= 3 and row[1] == student_name]
+            
+        available_qs = [q for q in all_qs if q not in asked_qs]
+        
+        if not available_qs:
+            available_qs = all_qs 
+            
+        selected_q = random.choice(available_qs)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sheet_asked.append_row([timestamp, student_name, selected_q])
+        
+        return selected_q
+    except Exception as e:
+        try:
+            sheet_q = client.open(SHEET_NAME).worksheet("Questions")
+            vals = [v for v in sheet_q.col_values(1) if v.strip()]
+            return random.choice(vals) if vals else None
+        except:
+            return None
 
 @st.cache_data(show_spinner=False)
 def get_image_base64(image_path):
@@ -155,7 +179,6 @@ def calculate_batting_average(df, student, image_path):
     recent_records = target_df.tail(5)['Result'].tolist()
     return recent_records.count('O') / len(recent_records), recent_records
 
-# [NEW] Daily Pitching용 가중치 기반 이미지 추출 로직
 def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
     target_path = os.path.join(BASE_FOLDER, folder_name, student_name, subfolder)
     if not os.path.exists(target_path): return []
@@ -178,13 +201,13 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
     def get_count(img_path):
         return counts.get(os.path.basename(img_path), 0)
         
-    random.shuffle(all_imgs) # 동률일 경우를 대비해 먼저 섞기
-    all_imgs.sort(key=get_count) # 출제 횟수 적은 순으로 정렬
+    random.shuffle(all_imgs) 
+    all_imgs.sort(key=get_count) 
     
     return all_imgs[:n]
 
 # ==========================================
-# [로직] 결과 인증 이미지 생성 (PIL)
+# [로직] 결과 인증 이미지 생성 (3열 레이아웃 개편)
 # ==========================================
 def hex_to_rgb(hex_str):
     h = hex_str.lstrip('#')
@@ -195,14 +218,32 @@ def get_label_bg_rgba(label_text: str):
     if label_text.endswith('S'): return (199, 142, 43, 160) # YELLOW
     return (62, 129, 97, 160) # GREEN
 
-def create_summary_image_base64(student_name, image_paths, question_text=None):
+def create_summary_image_base64(student_name, results_list, db_df, question_text=None):
     TARGET_HEIGHT = 140
-    HEADER_HEIGHT = 50
-    GRID_COLS = 4
-    FONT_SIZE = 30
+    HEADER_HEIGHT = 60
+    COL1_W = 60   # 1열: O/X 공간
+    COL2_W = 160  # 2열: 타율 및 히스토리 공간
     
-    resized_images = []
-    for p in image_paths:
+    try:
+        font_header = ImageFont.truetype(FONT_PATH, 30)
+        font_large = ImageFont.truetype(FONT_PATH, 40)
+        font_medium = ImageFont.truetype(FONT_PATH, 20)
+        font_small = ImageFont.truetype(FONT_PATH, 16)
+    except:
+        font_header = font_large = font_medium = font_small = ImageFont.load_default()
+
+    row_data = []
+    max_img_w = 0
+    for r in results_list:
+        p = r['file']
+        res = r['result']
+        
+        # 최신 타율 계산 (방금 한 피칭 결과 포함)
+        _, hist = calculate_batting_average(db_df, student_name, p)
+        hist.append(res)
+        hist = hist[-5:] # 최근 5개만 유지
+        avg = hist.count('O') / len(hist)
+        
         try:
             img = Image.open(p).convert("RGBA")
             scale = TARGET_HEIGHT / img.size[1]
@@ -211,46 +252,53 @@ def create_summary_image_base64(student_name, image_paths, question_text=None):
             bg = Image.new("RGBA", (new_w, TARGET_HEIGHT), "WHITE")
             bg.paste(img, (0, 0), img)
             label = os.path.basename(os.path.dirname(p))
-            resized_images.append((bg.convert("RGB"), label))
+            row_data.append({
+                'img': bg.convert("RGB"), 'label': label, 
+                'res': res, 'avg': avg, 'hist': hist, 'w': new_w
+            })
+            if new_w > max_img_w: max_img_w = new_w
         except: continue
 
-    rows = len(resized_images) + (1 if question_text else 0)
-    total_height = HEADER_HEIGHT + TARGET_HEIGHT * rows
-    max_w = max([img.size[0] for img, _ in resized_images] + [TARGET_HEIGHT * GRID_COLS]) if resized_images else TARGET_HEIGHT * GRID_COLS
-    
-    final_image = Image.new("RGB", (max_w, total_height), "white")
+    TOTAL_WIDTH = max(COL1_W + COL2_W + max_img_w, 600)
+    rows = len(row_data) + (1 if question_text else 0)
+    TOTAL_HEIGHT = HEADER_HEIGHT + TARGET_HEIGHT * rows
+
+    final_image = Image.new("RGB", (TOTAL_WIDTH, TOTAL_HEIGHT), "white")
     draw = ImageDraw.Draw(final_image)
     
-    try: font = ImageFont.truetype(FONT_PATH, FONT_SIZE)
-    except: font = ImageFont.load_default()
-    
     today_display = datetime.today().strftime('%m/%d').lstrip("0").replace("/0", "/")
-    draw.text((10, 10), f"{student_name} {today_display} 숙제 완료", fill="black", font=font)
+    draw.text((20, 15), f"{student_name} {today_display} 숙제 완료", fill="black", font=font_header)
 
     y_offset = HEADER_HEIGHT
-    for img, label in resized_images:
-        final_image.paste(img, (0, y_offset))
-        # 뱃지 그리기
-        try: label_font = ImageFont.truetype(FONT_PATH, 18)
-        except: label_font = ImageFont.load_default()
-        bg_rgba = get_label_bg_rgba(str(label))
+    for item in row_data:
+        # 1열: O/X 표시
+        res_color = "#3E8161" if item['res'] == 'O' else "#D6524B"
+        draw.text((15, y_offset + 45), item['res'], fill=res_color, font=font_large)
         
-        # 간단한 뱃지 사각형
+        # 2열: 타율 및 기록
+        hist_str = " ".join(item['hist'])
+        avg_str = f"{int(item['avg']*100)}%\n{hist_str}"
+        draw.text((COL1_W, y_offset + 45), avg_str, fill="#333333", font=font_medium)
+        
+        # 3열: 이미지 붙여넣기
+        img_x_offset = COL1_W + COL2_W
+        final_image.paste(item['img'], (img_x_offset, y_offset))
+        
+        # 뱃지 (라벨)
+        bg_rgba = get_label_bg_rgba(str(item['label']))
         draw_rect = ImageDraw.Draw(final_image, "RGBA")
-        tw = draw_rect.textlength(str(label), font=label_font)
-        draw_rect.rectangle((0, y_offset, tw + 12, y_offset + 24), fill=bg_rgba)
-        draw_rect.text((6, y_offset + 2), str(label), fill="white", font=label_font)
+        tw = draw_rect.textlength(str(item['label']), font=font_small)
+        draw_rect.rectangle((img_x_offset, y_offset, img_x_offset + tw + 12, y_offset + 24), fill=bg_rgba)
+        draw_rect.text((img_x_offset + 6, y_offset + 2), str(item['label']), fill="white", font=font_small)
+        
+        # 행 구분선 
+        draw.line([(0, y_offset + TARGET_HEIGHT), (TOTAL_WIDTH, y_offset + TARGET_HEIGHT)], fill="#E0E0E0", width=1)
         
         y_offset += TARGET_HEIGHT
 
     if question_text:
-        q_box = Image.new("RGB", (max_w, TARGET_HEIGHT), "white")
-        q_draw = ImageDraw.Draw(q_box)
-        wrapped = textwrap.fill(question_text, width=40)
-        try: q_font = ImageFont.truetype(FONT_PATH, 24)
-        except: q_font = ImageFont.load_default()
-        q_draw.text((20, 20), wrapped, fill="black", font=q_font)
-        final_image.paste(q_box, (0, y_offset))
+        wrapped = textwrap.fill(question_text, width=45)
+        draw.text((20, y_offset + 20), wrapped, fill="black", font=font_medium)
 
     buffered = BytesIO()
     final_image.save(buffered, format="JPEG")
@@ -315,12 +363,11 @@ if st.session_state['mode'] == 'setup':
     if url_student and selected_data:
         st.markdown(f"### {url_student} 님, 환영합니다!")
         
-        st.markdown("---")
-        if st.button("🚀 오늘의 Daily Homework 시작", use_container_width=True):
+        # 버튼 사이즈 및 아이콘 등 디테일 수정
+        if st.button("오늘의 Daily Homework 시작"):
             if client: st.session_state['db_data'] = get_data_from_sheet(client)
             db_df = st.session_state.get('db_data', pd.DataFrame())
             
-            # 현행 6개, 지난 4개 추출 (가중치 적용)
             curr_imgs = get_daily_target_images(folder_name, student_name, "현행 챕터", 6, db_df)
             past_imgs = get_daily_target_images(folder_name, student_name, "지난 챕터", 4, db_df)
             
@@ -338,7 +385,7 @@ if st.session_state['mode'] == 'setup':
             else:
                 st.warning("출제할 이미지가 없습니다. 폴더 구성을 확인해 주세요.")
         
-        st.markdown("---")
+        st.write("") # 간격 띄우기
         st.markdown("👈 특정 챕터만 골라서 연습하려면 왼쪽에서 챕터를 선택하세요.")
     else:
         st.markdown("### 👈 왼쪽 사이드바에서 수강생을 선택해주세요.")
@@ -351,7 +398,7 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
     is_daily = st.session_state.get('is_daily', False)
 
     if is_practice: st.warning("현재 '틀린 구간 반복 모드'입니다. (기록되지 않음)")
-    elif is_daily: st.info("📚 오늘의 Daily Homework 진행 중")
+    elif is_daily: st.info("오늘의 Daily Homework 진행 중")
     
     st.progress(idx / len(playlist) if len(playlist) > 0 else 0)
     st.caption(f"Progress: {idx + 1} / {len(playlist)}")
@@ -375,7 +422,6 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                 st.session_state['current_index'] += 1
                 st.rerun()
         
-        # 이전 취소 (Undo) 버튼
         if idx > 0 and not is_practice:
             st.write("")
             if st.button("⬅️ 이전 취소 (Undo)", use_container_width=True):
@@ -427,19 +473,23 @@ elif st.session_state['mode'] == 'daily_result':
     with st.spinner("인증용 이미지를 굽고 있습니다..."):
         question = None
         if "Syntax + Open-ended Question" in st.session_state['folder_name']:
-            question = get_random_question(client)
+            question = get_random_question(client, st.session_state['student_name'])
         
-        b64_img = create_summary_image_base64(st.session_state['student_name'], [r['file'] for r in results], question)
-        st.markdown(f'<img src="data:image/jpeg;base64,{b64_img}" style="width:100%; max-width:500px; border:1px solid #ddd; border-radius:8px;">', unsafe_allow_html=True)
+        # 이미지 생성 함수 호출 시 DB 데이터도 함께 넘김
+        db_df = st.session_state.get('db_data', pd.DataFrame())
+        b64_img = create_summary_image_base64(st.session_state['student_name'], results, db_df, question)
+        
+        # 이미지 테두리(border) 속성 삭제
+        st.markdown(f'<img src="data:image/jpeg;base64,{b64_img}" style="width:100%; max-width:500px; border-radius:8px;">', unsafe_allow_html=True)
 
     st.markdown("---")
     c1, c2 = st.columns(2)
     with c1:
-        if failed_items and st.button("🔥 틀린 구간 조지고 자기 (반복)", use_container_width=True):
-            st.session_state.update({'playlist': random.sample(failed_items, len(failed_items)), 'current_index': 0, 'is_practice_mode': True, 'mode': 'daily_playing'})
+        if failed_items and st.button("틀린 구간 반복", use_container_width=True):
+            st.session_state.update({'playlist': [r['file'] for r in results if r['result'] == 'X'], 'current_index': 0, 'is_practice_mode': True, 'mode': 'daily_playing'})
             st.rerun()
     with c2:
-        if st.button("🏠 홈으로 돌아가기", use_container_width=True):
+        if st.button("홈 화면으로", use_container_width=True):
             st.session_state['mode'] = 'setup'
             st.rerun()
 
