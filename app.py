@@ -210,21 +210,19 @@ def get_label_bg_rgba(label_text: str):
     return (62, 129, 97, 180) # GREEN
 
 def create_summary_image_base64(student_name, results_list, db_df, question_text=None):
-    # 세로 높이 압축 (140 -> 110)
     TARGET_HEIGHT = 110 
     HEADER_HEIGHT = 70
-    COL1_W = 60   # O/X 공간
-    COL2_W = 120  # 타율 공간
+    STAT_W = 100  # 타율 통계 영역 너비 (1열 O/X 삭제)
     
     try:
         font_title = ImageFont.truetype(FONT_PATH, 32)
-        font_ox = ImageFont.truetype(FONT_PATH, 36)
-        font_stat_pct = ImageFont.truetype(FONT_PATH, 18)
+        font_stat_pct = ImageFont.truetype(FONT_PATH, 20) # 퍼센트 폰트 약간 키움
         font_stat_hist = ImageFont.truetype(FONT_PATH, 14)
         font_label = ImageFont.truetype(FONT_PATH, 13)
         font_q = ImageFont.truetype(FONT_PATH, 24)
+        font_footer = ImageFont.truetype(FONT_PATH, 18)
     except:
-        font_title = font_ox = font_stat_pct = font_stat_hist = font_label = font_q = ImageFont.load_default()
+        font_title = font_stat_pct = font_stat_hist = font_label = font_q = font_footer = ImageFont.load_default()
 
     row_data = []
     max_img_w = 0
@@ -252,19 +250,19 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             if new_w > max_img_w: max_img_w = new_w
         except: continue
 
-    # 가로 폭 넉넉하게 확보
-    TOTAL_WIDTH = max(COL1_W + COL2_W + max_img_w + 30, 800) 
+    TOTAL_WIDTH = max(STAT_W + max_img_w + 40, 750) 
     
-    # 질문 박스 높이 동적 계산 (가로 폭 꽉 차게 75글자 제한)
+    # 질문 박스 줄바꿈 및 높이 계산
     q_lines = []
     q_height = 0
     if question_text:
-        wrapped = textwrap.fill(question_text, width=75)
+        wrapped = textwrap.fill(question_text, width=65) # 줄바꿈 폭 여유 확보
         q_lines = wrapped.split('\n')
-        q_height = max(100, len(q_lines) * 35 + 50) 
+        q_height = len(q_lines) * 35 + 40 
 
     rows = len(row_data)
-    TOTAL_HEIGHT = HEADER_HEIGHT + (TARGET_HEIGHT * rows) + q_height + 20
+    footer_height = 60 # 카톡 제출 안내 문구 영역
+    TOTAL_HEIGHT = HEADER_HEIGHT + (TARGET_HEIGHT * rows) + q_height + footer_height
 
     final_image = Image.new("RGB", (TOTAL_WIDTH, TOTAL_HEIGHT), "white")
     draw = ImageDraw.Draw(final_image)
@@ -275,20 +273,25 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
 
     y_offset = HEADER_HEIGHT
     for item in row_data:
-        # 수직 중앙 정렬을 위한 좌표 계산
         center_y = y_offset + (TARGET_HEIGHT // 2)
         
-        # 1열: O/X 표시 (모던한 색상 적용)
-        res_color = "#27AE60" if item['res'] == 'O' else "#E74C3C"
-        draw.text((15, center_y - 20), item['res'], fill=res_color, font=font_ox)
+        # 타율 값에 따른 컬러 지정 로직 (0~20% 빨강, 40~60% 주황, 80~100% 진회색)
+        avg_pct = int(item['avg'] * 100)
+        if avg_pct <= 20:
+            pct_color = "#E74C3C" # 빨간색
+        elif avg_pct <= 60:
+            pct_color = "#F39C12" # 주황/노란색
+        else:
+            pct_color = "#34495E" # 기존 진회색
         
-        # 2열: 타율 및 기록 (위아래 예쁘게 배치)
+        # 1열: 타율 (%)
+        draw.text((20, center_y - 18), f"{avg_pct}%", fill=pct_color, font=font_stat_pct)
+        # 1열 아래: O/X 히스토리 (연하게)
         hist_str = " ".join(item['hist'])
-        draw.text((COL1_W + 5, center_y - 18), f"{int(item['avg']*100)}%", fill="#34495E", font=font_stat_pct)
-        draw.text((COL1_W + 5, center_y + 8), hist_str, fill="#7F8C8D", font=font_stat_hist)
+        draw.text((20, center_y + 8), hist_str, fill="#95A5A6", font=font_stat_hist)
         
-        # 3열: 이미지 붙여넣기
-        img_x_offset = COL1_W + COL2_W
+        # 2열: 이미지 붙여넣기
+        img_x_offset = STAT_W
         final_image.paste(item['img'], (img_x_offset, y_offset))
         
         # 뱃지 (라벨)
@@ -303,17 +306,21 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
         
         y_offset += TARGET_HEIGHT
 
-    # 질문 박스 디자인
+    # 질문 렌더링 (테두리 삭제, 넉넉한 공간)
     if question_text:
-        q_y_start = y_offset + 15
-        # 연한 회색/블루 톤의 둥근 박스 느낌
-        draw.rectangle([(20, q_y_start), (TOTAL_WIDTH - 20, TOTAL_HEIGHT - 20)], fill="#F8F9FA", outline="#E9ECEF", width=1)
-        draw.text((40, q_y_start + 25), "Q.", fill="#3498DB", font=font_title)
+        q_y_start = y_offset + 20
+        draw.text((20, q_y_start), "Q.", fill="#3498DB", font=font_title)
         
-        text_y = q_y_start + 30
+        text_y = q_y_start + 5
         for line in q_lines:
-            draw.text((85, text_y), line, fill="#2C3E50", font=font_q)
+            draw.text((65, text_y), line, fill="#2C3E50", font=font_q)
             text_y += 35
+        
+        y_offset = text_y + 10
+
+    # 맨 하단 카톡 안내 문구
+    footer_y_start = y_offset if not question_text else y_offset
+    draw.text((20, footer_y_start + 10), "* 카톡 녹음 기능으로 제출해주세요!", fill="#7F8C8D", font=font_footer)
 
     buffered = BytesIO()
     final_image.save(buffered, format="JPEG", quality=95)
@@ -378,7 +385,6 @@ if st.session_state['mode'] == 'setup':
     if url_student and selected_data:
         st.markdown(f"### {url_student} 님, 환영합니다!")
         
-        # 꽉 찬 버튼이 아닌 일반 사이즈 버튼 (왼쪽 정렬)
         if st.button("오늘의 Daily Homework 시작"):
             if client: st.session_state['db_data'] = get_data_from_sheet(client)
             db_df = st.session_state.get('db_data', pd.DataFrame())
@@ -495,7 +501,7 @@ elif st.session_state['mode'] == 'daily_result':
         
         st.markdown(f'<img src="data:image/jpeg;base64,{b64_img}" style="width:100%; max-width:600px; border-radius:8px;">', unsafe_allow_html=True)
 
-    st.markdown("---")
+    # 버튼 위 가로 구분선 제거
     c1, c2 = st.columns(2)
     with c1:
         if failed_items and st.button("틀린 구간 반복", use_container_width=True):
