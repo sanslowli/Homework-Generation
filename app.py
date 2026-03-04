@@ -42,7 +42,6 @@ ALLOWED_SUBFOLDERS = ["현행 챕터", "지난 챕터"]
 SHEET_NAME = "Syntax Pitching DB"
 FONT_PATH = os.path.join(BASE_FOLDER, "font.ttf")
 
-# [NEW] 서버 시간에 구애받지 않는 한국 표준시(KST) 반환 함수
 def get_kst_now():
     return datetime.utcnow() + timedelta(hours=9)
 
@@ -91,6 +90,18 @@ def get_attendance(client, student_name, year, month):
                 attended_days.add(dt.day)
         except: pass
     return attended_days
+
+# [NEW] 학생의 모든 챕터 누적 타율 계산 함수
+def get_overall_stats(db_df, student_name):
+    if db_df.empty: return {}
+    df = db_df[(db_df['Student'] == student_name) & (db_df['Chapter'] != 'Attendance')]
+    stats = {}
+    for ch in df['Chapter'].unique():
+        cdf = df[df['Chapter'] == ch]
+        total = len(cdf)
+        if total > 0:
+            stats[ch] = int((len(cdf[cdf['Result'] == 'O']) / total) * 100)
+    return dict(sorted(stats.items()))
 
 def get_random_question(client, student_name):
     try:
@@ -222,31 +233,29 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
     return all_imgs[:n]
 
 # ==========================================
-# [로직] 결과 인증 이미지 생성 (달력 + 정중앙 2열)
+# [로직] 결과 인증 이미지 생성 (극강의 실속 레이아웃)
 # ==========================================
 def get_label_bg_rgba(label_text: str):
-    if label_text.startswith('1'): return (214, 82, 75, 180) 
-    if label_text.endswith('S'): return (199, 142, 43, 180) 
-    return (62, 129, 97, 180) 
+    if label_text.startswith('1'): return (214, 82, 75, 230) 
+    if label_text.endswith('S'): return (199, 142, 43, 230) 
+    return (62, 129, 97, 230) 
 
 def create_summary_image_base64(student_name, results_list, db_df, question_text, current_year, current_month, attended_days):
-    # 레이아웃 상수 (가로 760px 고정, 높이 80px 압축)
     TOTAL_WIDTH = 760
-    TARGET_HEIGHT = 80 
+    TARGET_HEIGHT = 80 # 이미지 높이 80px 압축
     HEADER_HEIGHT = 60
-    STAT_W = 60  
-    COL_W = (TOTAL_WIDTH - 40) // 2
-    CENTER_X = TOTAL_WIDTH // 2
+    COL_W = TOTAL_WIDTH // 2 # 열당 380px 꽉 채움 (여백 0)
     
     try:
         font_title = ImageFont.truetype(FONT_PATH, 32)
+        font_cal_title = ImageFont.truetype(FONT_PATH, 20)
         font_cal = ImageFont.truetype(FONT_PATH, 16)
-        font_stat_pct = ImageFont.truetype(FONT_PATH, 18) 
+        font_stat_pct = ImageFont.truetype(FONT_PATH, 15) 
         font_stat_hist = ImageFont.truetype(FONT_PATH, 14)
         font_label = ImageFont.truetype(FONT_PATH, 13)
         font_q = ImageFont.truetype(FONT_PATH, 28) 
     except:
-        font_title = font_cal = font_stat_pct = font_stat_hist = font_label = font_q = ImageFont.load_default()
+        font_title = font_cal_title = font_cal = font_stat_pct = font_stat_hist = font_label = font_q = ImageFont.load_default()
 
     row_data = []
     for r in results_list:
@@ -259,11 +268,16 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
         
         try:
             img = Image.open(p).convert("RGBA")
-            scale = TARGET_HEIGHT / img.size[1]
+            # 비율 유지하며 리사이즈 (COL_W 넘어가면 컷팅 안되게 스케일 조정)
+            scale = min(TARGET_HEIGHT / img.size[1], COL_W / img.size[0])
             new_w = int(img.size[0] * scale)
-            img = img.resize((new_w, TARGET_HEIGHT), resample=Image.LANCZOS)
-            bg = Image.new("RGBA", (new_w, TARGET_HEIGHT), "WHITE")
-            bg.paste(img, (0, 0), img)
+            new_h = int(img.size[1] * scale)
+            img = img.resize((new_w, new_h), resample=Image.LANCZOS)
+            
+            # 셀 공간 전체를 흰색으로 채우고 이미지는 가운데 정렬
+            bg = Image.new("RGBA", (COL_W, TARGET_HEIGHT), "WHITE")
+            bg.paste(img, ((COL_W - new_w)//2, (TARGET_HEIGHT - new_h)//2), img)
+            
             label = os.path.basename(os.path.dirname(p))
             row_data.append({
                 'img': bg.convert("RGB"), 'label': label, 
@@ -271,17 +285,17 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             })
         except: continue
     
-    # 달력 높이 계산 (사각형 채우기 방식)
+    # 1. 달력 및 종합 타율 공간 계산
     calendar.setfirstweekday(calendar.SUNDAY)
     cal_matrix = calendar.monthcalendar(current_year, current_month)
-    row_height = 40
-    CALENDAR_HEIGHT = row_height + (len(cal_matrix) * row_height) + 20 
+    row_height = 35
+    CALENDAR_HEIGHT = row_height + (len(cal_matrix) * row_height) + 30 
 
-    # 이미지 높이 계산 (2열 분할)
+    # 2. 이미지 2열 분할 높이 계산
     grid_rows = (len(row_data) + 1) // 2
     GRID_HEIGHT = grid_rows * TARGET_HEIGHT
 
-    # 질문 박스 높이
+    # 3. 질문 박스 높이
     q_lines = []
     q_height = 0
     if question_text:
@@ -294,19 +308,18 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     final_image = Image.new("RGB", (TOTAL_WIDTH, TOTAL_HEIGHT), "white")
     draw = ImageDraw.Draw(final_image)
     
-    # 1. 헤더 렌더링
+    # [헤더]
     today = get_kst_now()
     today_display = today.strftime('%m/%d').lstrip("0").replace("/0", "/")
     title_text = f"{student_name} {today_display} 숙제 완료"
     draw.text((20, 15), title_text, fill="black", font=font_title)
 
-    # 2. 미니멀 달력 렌더링 (가로 꽉 차게, 셀 전체 칠하기)
+    # [좌측: 달력 원상복구 (작게)]
     cal_start_y = HEADER_HEIGHT
     days_header = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
-    cal_width = TOTAL_WIDTH - 40
+    cal_width = 320 # 달력 가로 사이즈 축소
     col_spacing = cal_width / 7.0
     
-    # 요일 헤더
     for i, day_str in enumerate(days_header):
         tb = draw.textbbox((0, 0), day_str, font=font_cal)
         tw = tb[2] - tb[0]
@@ -328,52 +341,63 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
                 txt_y = dy + (row_height - th) / 2 - 2
 
                 if day in attended_days:
-                    # 셀 전체 진회색 채우기
-                    draw.rectangle([dx, dy, dx + col_spacing, dy + row_height], fill="#555555")
+                    draw.rectangle([dx+2, dy+2, dx + col_spacing - 2, dy + row_height - 2], fill="#555555")
                     draw.text((txt_x, txt_y), day_str, fill="white", font=font_cal)
                 else:
                     draw.text((txt_x, txt_y), day_str, fill="black", font=font_cal)
         cal_y += row_height
 
-    # 3. 정중앙 분할 2열 그리드 렌더링
-    grid_y_start = cal_y + 15
+    # [우측: 전체 챕터 종합 타율 대시보드]
+    overall_stats = get_overall_stats(db_df, student_name)
+    stat_start_x = 380
+    draw.text((stat_start_x, cal_start_y + 5), "누적 챕터별 타율", fill="#34495E", font=font_cal_title)
     
-    # 정중앙 세로 구분선
-    draw.line([(CENTER_X, grid_y_start), (CENTER_X, grid_y_start + GRID_HEIGHT)], fill="#ECF0F1", width=1)
+    stat_y = cal_start_y + 40
+    for i, (ch, pct) in enumerate(overall_stats.items()):
+        # 챕터 개수가 많을 것을 대비해 우측 공간 내에서 2열 배치
+        cx = stat_start_x if i % 2 == 0 else stat_start_x + 160
+        cy = stat_y + (i // 2) * 30
+        draw.text((cx, cy), f"{ch}:", fill="#7F8C8D", font=font_cal)
+        
+        pct_color = "#E74C3C" if pct <= 20 else "#F39C12" if pct <= 60 else "black"
+        draw.text((cx + 50, cy), f"{pct}%", fill=pct_color, font=font_cal)
+
+    # [하단: 여백 0, 구분선 0의 정중앙 분할 2열 이미지 그리드]
+    grid_y_start = cal_y + 15
     
     for i, item in enumerate(row_data):
         r = i // 2
         c = i % 2
-        x_off = 20 if c == 0 else CENTER_X + 20
+        x_off = c * COL_W # 여백 0으로 딱 붙임
         y_off = grid_y_start + r * TARGET_HEIGHT
         
-        center_y = y_off + (TARGET_HEIGHT // 2)
         avg_pct = int(item['avg'] * 100)
-        
-        pct_color = "#E74C3C" if avg_pct <= 20 else "#F39C12" if avg_pct <= 60 else "black"
-        
-        # 타율 (%)
-        draw.text((x_off, center_y - 18), f"{avg_pct}%", fill=pct_color, font=font_stat_pct)
-        # O/X 히스토리 (연회색 복구)
+        pct_color = "#E74C3C" if avg_pct <= 20 else "#E67E22" if avg_pct <= 60 else "black"
         hist_str = " ".join(item['hist'])
-        draw.text((x_off, center_y + 8), hist_str, fill="#95A5A6", font=font_stat_hist)
         
-        # 이미지 (최대 4칸짜리도 들어갈 수 있게 설계)
-        img_x_offset = x_off + STAT_W
-        final_image.paste(item['img'], (img_x_offset, y_off))
+        # 이미지 전체를 칸에 맞게 붙여넣기
+        final_image.paste(item['img'], (x_off, y_off))
         
-        # 뱃지 (라벨)
+        # [스마트 오버레이 뱃지] 좌측 상단 반투명 스트립
+        badge_h = 24
         bg_rgba = get_label_bg_rgba(str(item['label']))
-        draw_rect = ImageDraw.Draw(final_image, "RGBA")
-        tw = draw_rect.textlength(str(item['label']), font=font_label)
-        draw_rect.rectangle((img_x_offset, y_off, img_x_offset + tw + 10, y_off + 22), fill=bg_rgba)
-        draw_rect.text((img_x_offset + 5, y_off + 2), str(item['label']), fill="white", font=font_label)
         
-        # 가로 행 구분선
-        col_width_actual = CENTER_X - 20 if c == 0 else TOTAL_WIDTH - CENTER_X - 20
-        draw.line([(x_off, y_off + TARGET_HEIGHT), (x_off + col_width_actual, y_off + TARGET_HEIGHT)], fill="#ECF0F1", width=1)
+        # 전체 스트립 배경 (반투명 흰색)
+        draw.rectangle([x_off, y_off, x_off + 175, y_off + badge_h], fill=(255, 255, 255, 230))
+        
+        # 챕터명 색상 박스
+        tb_label = draw.textbbox((0, 0), str(item['label']), font=font_label)
+        label_w = tb_label[2] - tb_label[0]
+        draw_rect = ImageDraw.Draw(final_image, "RGBA")
+        draw_rect.rectangle((x_off, y_off, x_off + label_w + 10, y_off + badge_h), fill=bg_rgba)
+        draw_rect.text((x_off + 5, y_off + 4), str(item['label']), fill="white", font=font_label)
+        
+        # 타율 텍스트 오버레이
+        stat_x = x_off + label_w + 16
+        draw.text((stat_x, y_off + 3), f"{avg_pct}%", fill=pct_color, font=font_stat_pct)
+        draw.text((stat_x + 40, y_off + 4), hist_str, fill="#95A5A6", font=font_stat_hist)
 
-    # 4. 질문 렌더링
+    # [질문 렌더링]
     y_offset = grid_y_start + GRID_HEIGHT
     if question_text:
         q_y_start = y_offset + 10 
