@@ -10,6 +10,7 @@ import base64
 import unicodedata
 import textwrap
 from io import BytesIO
+import calendar
 
 # ==========================================
 # [설정] 기본 경로 및 구글 시트
@@ -71,6 +72,22 @@ def save_to_sheet(client, student, chapter, image, result):
         st.cache_data.clear() 
     except Exception as e:
         pass
+
+# [NEW] 출석 기록 가져오기 (이번 달 기준)
+def get_attendance(client, student_name, year, month):
+    df = get_data_from_sheet(client)
+    if df.empty: return set()
+    att_df = df[(df['Student'] == student_name) & (df['Chapter'] == 'Attendance') & (df['Result'] == 'DONE')]
+    if att_df.empty: return set()
+    
+    attended_days = set()
+    for ts in att_df['Timestamp']:
+        try:
+            dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+            if dt.year == year and dt.month == month:
+                attended_days.add(dt.day)
+        except: pass
+    return attended_days
 
 def get_random_question(client, student_name):
     try:
@@ -202,33 +219,34 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
     return all_imgs[:n]
 
 # ==========================================
-# [로직] 결과 인증 이미지 생성
+# [로직] 결과 인증 이미지 생성 (달력 + 2열 배치)
 # ==========================================
 def get_label_bg_rgba(label_text: str):
-    if label_text.startswith('1'): return (214, 82, 75, 180) # RED
-    if label_text.endswith('S'): return (199, 142, 43, 180) # YELLOW
-    return (62, 129, 97, 180) # GREEN
+    if label_text.startswith('1'): return (214, 82, 75, 180) 
+    if label_text.endswith('S'): return (199, 142, 43, 180) 
+    return (62, 129, 97, 180) 
 
-def create_summary_image_base64(student_name, results_list, db_df, question_text=None):
+def create_summary_image_base64(student_name, results_list, db_df, question_text, current_year, current_month, attended_days):
     TARGET_HEIGHT = 110 
-    HEADER_HEIGHT = 70
-    STAT_W = 100  
+    HEADER_HEIGHT = 60
+    STAT_W = 80  
     
     try:
         font_title = ImageFont.truetype(FONT_PATH, 32)
+        font_cal_title = ImageFont.truetype(FONT_PATH, 24)
+        font_cal = ImageFont.truetype(FONT_PATH, 16)
         font_stat_pct = ImageFont.truetype(FONT_PATH, 20) 
         font_stat_hist = ImageFont.truetype(FONT_PATH, 14)
         font_label = ImageFont.truetype(FONT_PATH, 13)
-        font_q = ImageFont.truetype(FONT_PATH, 28) # 질문 폰트 사이즈 업 (24 -> 28)
+        font_q = ImageFont.truetype(FONT_PATH, 28) 
     except:
-        font_title = font_stat_pct = font_stat_hist = font_label = font_q = ImageFont.load_default()
+        font_title = font_cal_title = font_cal = font_stat_pct = font_stat_hist = font_label = font_q = ImageFont.load_default()
 
     row_data = []
     max_img_w = 0
     for r in results_list:
         p = r['file']
         res = r['result']
-        
         _, hist = calculate_batting_average(db_df, student_name, p)
         hist.append(res)
         hist = hist[-5:] 
@@ -249,64 +267,105 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             if new_w > max_img_w: max_img_w = new_w
         except: continue
 
-    TOTAL_WIDTH = max(STAT_W + max_img_w + 40, 750) 
+    # 가로 사이즈 2열(2 columns) 기준으로 계산
+    CELL_W = STAT_W + max_img_w + 30
+    TOTAL_WIDTH = max(CELL_W * 2 + 60, 800) 
+    COL_W = (TOTAL_WIDTH - 40) // 2
     
-    # 질문 박스 줄바꿈 및 높이 계산
+    # 달력 높이 계산
+    calendar.setfirstweekday(calendar.SUNDAY)
+    cal_matrix = calendar.monthcalendar(current_year, current_month)
+    CALENDAR_HEIGHT = 40 + 30 + (len(cal_matrix) * 30) + 20 # 제목 + 요일 + 주차 + 여백
+
+    # 이미지 높이 계산 (2열이므로 총 10개면 5행)
+    grid_rows = (len(row_data) + 1) // 2
+    GRID_HEIGHT = grid_rows * TARGET_HEIGHT
+
+    # 질문 박스 높이
     q_lines = []
     q_height = 0
     if question_text:
-        wrapped = textwrap.fill(question_text, width=65) 
+        wrapped = textwrap.fill(question_text, width=70) 
         q_lines = wrapped.split('\n')
-        q_height = len(q_lines) * 40 + 20 # 폰트가 커졌으므로 줄간격 조정 및 하단 여백 축소
+        q_height = len(q_lines) * 40 + 20 
 
-    rows = len(row_data)
-    # 푸터(카톡 안내문구) 제거로 인한 전체 높이 축소
-    TOTAL_HEIGHT = HEADER_HEIGHT + (TARGET_HEIGHT * rows) + q_height
+    TOTAL_HEIGHT = HEADER_HEIGHT + CALENDAR_HEIGHT + GRID_HEIGHT + q_height
 
     final_image = Image.new("RGB", (TOTAL_WIDTH, TOTAL_HEIGHT), "white")
     draw = ImageDraw.Draw(final_image)
     
+    # 1. 헤더 렌더링 (순수 검정)
     today_display = datetime.today().strftime('%m/%d').lstrip("0").replace("/0", "/")
-    title_text = f"{student_name} {today_display} Daily Pitching Record"
-    draw.text((20, 20), title_text, fill="black", font=font_title) # 제목 순수 검정
+    title_text = f"{student_name} {today_display} 숙제 완료"
+    draw.text((20, 15), title_text, fill="black", font=font_title)
 
-    y_offset = HEADER_HEIGHT
-    for item in row_data:
-        center_y = y_offset + (TARGET_HEIGHT // 2)
+    # 2. 미니멀 달력 렌더링 (영수증 감성)
+    cal_start_y = HEADER_HEIGHT
+    draw.text((20, cal_start_y), f"{current_year}. {current_month:02d}", fill="black", font=font_cal_title)
+    
+    days_header = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
+    cal_y = cal_start_y + 45
+    cal_x_start = 20
+    col_spacing = 55
+    
+    for i, day_str in enumerate(days_header):
+        draw.text((cal_x_start + i*col_spacing, cal_y), day_str, fill="#95A5A6", font=font_cal)
         
+    cal_y += 30
+    for week in cal_matrix:
+        for i, day in enumerate(week):
+            if day != 0:
+                dx = cal_x_start + i*col_spacing
+                dy = cal_y
+                if day in attended_days:
+                    # 마킹 (까만 동그라미)
+                    draw.ellipse([dx-6, dy-4, dx+24, dy+26], fill="black")
+                    # 숫자가 한 자리면 살짝 가운데로
+                    text_offset = 4 if day < 10 else 0
+                    draw.text((dx + text_offset, dy), str(day), fill="white", font=font_cal)
+                else:
+                    text_offset = 4 if day < 10 else 0
+                    draw.text((dx + text_offset, dy), str(day), fill="black", font=font_cal)
+        cal_y += 30
+
+    # 3. 2열 그리드 렌더링
+    grid_y_start = cal_y + 10
+    
+    for i, item in enumerate(row_data):
+        r = i // 2
+        c = i % 2
+        x_off = 20 + c * COL_W
+        y_off = grid_y_start + r * TARGET_HEIGHT
+        
+        center_y = y_off + (TARGET_HEIGHT // 2)
         avg_pct = int(item['avg'] * 100)
-        if avg_pct <= 20:
-            pct_color = "#E74C3C" 
-        elif avg_pct <= 60:
-            pct_color = "#F39C12" 
-        else:
-            pct_color = "black" # 80~100% 순수 검정
         
-        # 1열: 타율 (%)
-        draw.text((20, center_y - 18), f"{avg_pct}%", fill=pct_color, font=font_stat_pct)
-        # 1열 아래: O/X 히스토리 (순수 검정)
+        pct_color = "#E74C3C" if avg_pct <= 20 else "#F39C12" if avg_pct <= 60 else "black"
+        
+        # 타율 (%)
+        draw.text((x_off, center_y - 18), f"{avg_pct}%", fill=pct_color, font=font_stat_pct)
+        # O/X 히스토리
         hist_str = " ".join(item['hist'])
-        draw.text((20, center_y + 8), hist_str, fill="black", font=font_stat_hist)
+        draw.text((x_off, center_y + 8), hist_str, fill="black", font=font_stat_hist)
         
-        # 2열: 이미지 붙여넣기
-        img_x_offset = STAT_W
-        final_image.paste(item['img'], (img_x_offset, y_offset))
+        # 이미지 
+        img_x_offset = x_off + STAT_W
+        final_image.paste(item['img'], (img_x_offset, y_off))
         
         # 뱃지 (라벨)
         bg_rgba = get_label_bg_rgba(str(item['label']))
         draw_rect = ImageDraw.Draw(final_image, "RGBA")
         tw = draw_rect.textlength(str(item['label']), font=font_label)
-        draw_rect.rectangle((img_x_offset, y_offset, img_x_offset + tw + 10, y_offset + 22), fill=bg_rgba)
-        draw_rect.text((img_x_offset + 5, y_offset + 2), str(item['label']), fill="white", font=font_label)
+        draw_rect.rectangle((img_x_offset, y_off, img_x_offset + tw + 10, y_off + 22), fill=bg_rgba)
+        draw_rect.text((img_x_offset + 5, y_off + 2), str(item['label']), fill="white", font=font_label)
         
-        # 행 구분선 
-        draw.line([(20, y_offset + TARGET_HEIGHT), (TOTAL_WIDTH - 20, y_offset + TARGET_HEIGHT)], fill="#ECF0F1", width=1)
-        
-        y_offset += TARGET_HEIGHT
+        # 셀 바닥 구분선 (연하게)
+        draw.line([(x_off, y_off + TARGET_HEIGHT), (x_off + COL_W - 20, y_off + TARGET_HEIGHT)], fill="#ECF0F1", width=1)
 
-    # 질문 렌더링 ("Q." 제거 및 간격 축소, 순수 검정)
+    # 4. 질문 렌더링
+    y_offset = grid_y_start + GRID_HEIGHT
     if question_text:
-        q_y_start = y_offset + 10 # 간격을 바짝 좁힘
+        q_y_start = y_offset + 10 
         text_y = q_y_start
         for line in q_lines:
             draw.text((20, text_y), line, fill="black", font=font_q)
@@ -376,6 +435,10 @@ if st.session_state['mode'] == 'setup':
         st.markdown(f"### {url_student} 님, 환영합니다!")
         
         if st.button("오늘의 Daily Homework 시작"):
+            # 시작 시 기존 생성된 캐시 초기화
+            if 'daily_summary_img' in st.session_state: del st.session_state['daily_summary_img']
+            if 'daily_question' in st.session_state: del st.session_state['daily_question']
+                
             if client: st.session_state['db_data'] = get_data_from_sheet(client)
             db_df = st.session_state.get('db_data', pd.DataFrame())
             
@@ -440,6 +503,7 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                 st.session_state['results'].pop()
                 st.rerun()
 
+        # 연습 모드 도중 강제 종료
         if is_practice:
             st.write("")
             if st.button("연습 종료 후 결과로 돌아가기", use_container_width=True):
@@ -447,9 +511,9 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                 st.rerun()
 
     else:
+        # [MODIFIED] 연습 모드 끝에 도달했을 때 무한 루프 방지
         if is_practice:
-            random.shuffle(st.session_state['playlist'])
-            st.session_state['current_index'] = 0
+            st.session_state['mode'] = 'daily_result' if is_daily else 'setup'
             st.rerun()
         else:
             if is_daily:
@@ -481,15 +545,29 @@ elif st.session_state['mode'] == 'daily_result':
     st.markdown("### 📸 카카오톡 인증하기")
     st.info("👇 아래 이미지를 꾸욱 눌러서 **'복사'**한 뒤, 카카오톡 단톡방에 붙여넣어 인증해 주세요!")
     
-    with st.spinner("인증용 이미지를 굽고 있습니다..."):
-        question = None
-        if "Syntax + Open-ended Question" in st.session_state['folder_name']:
-            question = get_random_question(client, st.session_state['student_name'])
-        
-        db_df = st.session_state.get('db_data', pd.DataFrame())
-        b64_img = create_summary_image_base64(st.session_state['student_name'], results, db_df, question)
-        
-        st.markdown(f'<img src="data:image/jpeg;base64,{b64_img}" style="width:100%; max-width:600px; border-radius:8px;">', unsafe_allow_html=True)
+    # [MODIFIED] 결과 이미지 및 질문 캐싱 (재생성 방지 및 출석 1회만 기록)
+    if 'daily_summary_img' not in st.session_state:
+        with st.spinner("인증용 이미지를 굽고 있습니다..."):
+            # 1. 출석 기록 남기기
+            if client: save_to_sheet(client, st.session_state['student_name'], "Attendance", "Daily", "DONE")
+            
+            # 2. 질문 뽑기
+            question = None
+            if "Syntax + Open-ended Question" in st.session_state['folder_name']:
+                question = get_random_question(client, st.session_state['student_name'])
+                st.session_state['daily_question'] = question
+            
+            # 3. 달력용 이번 달 출석 기록 가져오기 (방금 기록한 것 포함)
+            today = datetime.today()
+            attended_days = get_attendance(client, st.session_state['student_name'], today.year, today.month)
+            
+            # 4. 이미지 합성
+            db_df = st.session_state.get('db_data', pd.DataFrame())
+            b64_img = create_summary_image_base64(st.session_state['student_name'], results, db_df, question, today.year, today.month, attended_days)
+            st.session_state['daily_summary_img'] = b64_img
+
+    b64_img = st.session_state['daily_summary_img']
+    st.markdown(f'<img src="data:image/jpeg;base64,{b64_img}" style="width:100%; max-width:600px; border-radius:8px;">', unsafe_allow_html=True)
 
     c1, c2 = st.columns(2)
     with c1:
