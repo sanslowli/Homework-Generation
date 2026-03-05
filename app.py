@@ -224,7 +224,6 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
 # [로직] 결과 인증 이미지 생성 (1.5배 고화질 & 실시간 합산)
 # ==========================================
 def create_summary_image_base64(student_name, results_list, db_df, question_text, current_year, current_month, attended_days):
-    # 1.5배 스케일업 상수
     TOTAL_WIDTH = 1140 
     TARGET_HEIGHT = 120  
     HEADER_HEIGHT = 90
@@ -241,27 +240,29 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     # 1. 종합 타율 계산 (과거 DB + 현재 세션 실시간 합산)
     overall_counts = {}
     
-    # 1-1. 기존 DB 통계 긁어오기
+    # 1-1. 기존 DB 통계 긁어오기 (숫자/문자 타입 통일 - 에러 방지)
     if not db_df.empty:
         student_df = db_df[(db_df['Student'] == student_name) & (db_df['Result'].isin(['O', 'X']))]
         for ch, group in student_df.groupby('Chapter'):
-            if ch == 'Attendance': continue
+            ch_str = str(ch) # Pandas가 501을 숫자로 읽는 것을 방지
+            if ch_str == 'Attendance': continue
             o_count = (group['Result'] == 'O').sum()
             total = len(group)
-            overall_counts[ch] = {'o': o_count, 'tot': total}
+            overall_counts[ch_str] = {'o': o_count, 'tot': total}
             
     # 1-2. 방금 친 피칭 결과(results_list) 실시간 합산
     for r in results_list:
-        ch = os.path.basename(os.path.dirname(r['file']))
+        ch_str = str(os.path.basename(os.path.dirname(r['file'])))
         res = r['result']
-        if ch not in overall_counts:
-            overall_counts[ch] = {'o': 0, 'tot': 0}
-        overall_counts[ch]['tot'] += 1
+        if ch_str not in overall_counts:
+            overall_counts[ch_str] = {'o': 0, 'tot': 0}
+        overall_counts[ch_str]['tot'] += 1
         if res == 'O':
-            overall_counts[ch]['o'] += 1
+            overall_counts[ch_str]['o'] += 1
 
     # 최종 타율 퍼센트 변환
     overall_stats = {ch: int((data['o'] / data['tot']) * 100) for ch, data in overall_counts.items() if data['tot'] > 0}
+    # 문자열로 통일되었으므로 Type Error 없이 정상 정렬됨
     sorted_chs = sorted(overall_stats.keys())
 
     # 2. 이미지 리사이징 (1.5배 적용)
@@ -280,7 +281,6 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             else:
                 img = img.resize((new_w, TARGET_HEIGHT), resample=Image.LANCZOS)
             
-            # 투명 배경 방지 흰색 캔버스 (크기는 딱 본인 너비만큼)
             bg = Image.new("RGB", img.size, "WHITE")
             bg.paste(img, (0, 0), img)
             row_data.append({'img': bg})
@@ -289,16 +289,15 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     # 3. 레이아웃 높이 계산
     calendar.setfirstweekday(calendar.SUNDAY)
     cal_matrix = calendar.monthcalendar(current_year, current_month)
-    cal_row_height = 45 # 1.5배
+    cal_row_height = 45 
     CALENDAR_HEIGHT = cal_row_height + (len(cal_matrix) * cal_row_height) + 15 
     
     overall_stat_rows = ((len(sorted_chs) - 1) // 2) + 1 if sorted_chs else 0
-    OVERALL_HEIGHT = max(CALENDAR_HEIGHT, overall_stat_rows * 52) # 행간격 52 (1.5배)
+    OVERALL_HEIGHT = max(CALENDAR_HEIGHT, overall_stat_rows * 52) 
 
     grid_rows = (len(row_data) + 1) // 2
     GRID_HEIGHT = grid_rows * TARGET_HEIGHT
 
-    # 질문 박스
     q_lines = []
     q_height = 0
     if question_text:
@@ -370,7 +369,6 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     for i, item in enumerate(row_data):
         r = i // 2
         c = i % 2
-        # 왼쪽 이미지는 30부터, 오른쪽 이미지는 무조건 중앙(CENTER_X + 30)부터 칼같이 시작!
         x_off = 30 if c == 0 else CENTER_X + 30
         y_off = grid_y_start + r * TARGET_HEIGHT
         
