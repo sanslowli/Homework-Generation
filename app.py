@@ -223,28 +223,19 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
 # ==========================================
 # [로직] 결과 인증 이미지 생성 (초밀착 최적화)
 # ==========================================
-def get_label_bg_rgba(label_text: str):
-    if label_text.startswith('1'): return (214, 82, 75, 180) 
-    if label_text.endswith('S'): return (199, 142, 43, 180) 
-    return (62, 129, 97, 180) 
-
 def create_summary_image_base64(student_name, results_list, db_df, question_text, current_year, current_month, attended_days):
     TOTAL_WIDTH = 760
-    TARGET_HEIGHT = 80  # 압축된 이미지 높이
-    CELL_HEADER_H = 26  # 정보 표시줄(배지, 타율) 높이
-    CELL_H = TARGET_HEIGHT + CELL_HEADER_H + 4
+    TARGET_HEIGHT = 80  
     HEADER_HEIGHT = 60
     CENTER_X = TOTAL_WIDTH // 2
     
     try:
         font_title = ImageFont.truetype(FONT_PATH, 32)
         font_cal = ImageFont.truetype(FONT_PATH, 16)
-        font_stat_pct = ImageFont.truetype(FONT_PATH, 20) # 챕터 배지 & 타율 크기 일치
-        font_stat_hist = ImageFont.truetype(FONT_PATH, 14)
-        font_overall = ImageFont.truetype(FONT_PATH, 24)  # 우측 종합 타율 폰트
+        font_overall = ImageFont.truetype(FONT_PATH, 24) 
         font_q = ImageFont.truetype(FONT_PATH, 28) 
     except:
-        font_title = font_cal = font_stat_pct = font_stat_hist = font_overall = font_q = ImageFont.load_default()
+        font_title = font_cal = font_overall = font_q = ImageFont.load_default()
 
     # 1. 종합 타율(전체 챕터) 계산
     overall_stats = {}
@@ -257,52 +248,61 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             overall_stats[ch] = int((o_count / total) * 100) if total > 0 else 0
     sorted_chs = sorted(overall_stats.keys())
 
-    # 2. 이미지 리사이징 데이터 준비
-    row_data = []
-    max_img_w = (TOTAL_WIDTH - 20) // 2 # 최대 370
+    # 2. 이미지 가로 최대 크기 구하기
+    max_img_w = 0
+    temp_images = []
     for r in results_list:
         p = r['file']
-        res = r['result']
-        _, hist = calculate_batting_average(db_df, student_name, p)
-        hist.append(res)
-        hist = hist[-5:] 
-        avg = hist.count('O') / len(hist)
-        
         try:
             img = Image.open(p).convert("RGBA")
             scale = TARGET_HEIGHT / img.size[1]
             new_w = int(img.size[0] * scale)
-            if new_w > max_img_w: new_w = max_img_w # 안전장치
-            img = img.resize((new_w, TARGET_HEIGHT), resample=Image.LANCZOS)
-            bg = Image.new("RGBA", (new_w, TARGET_HEIGHT), "WHITE")
-            bg.paste(img, (0, 0), img)
-            label = os.path.basename(os.path.dirname(p))
-            row_data.append({
-                'img': bg.convert("RGB"), 'label': label, 
-                'res': res, 'avg': avg, 'hist': hist
-            })
+            max_img_w = max(max_img_w, new_w)
+            temp_images.append({'p': p, 'w': new_w, 'img_obj': img})
         except: continue
+        
+    # 절반(CENTER_X - 20)을 넘지 않도록 제한
+    max_col_w = CENTER_X - 20
+    if max_img_w > max_col_w:
+        max_img_w = max_col_w
+        
+    row_data = []
+    for item in temp_images:
+        img = item['img_obj']
+        new_w = item['w']
+        if new_w > max_img_w:
+            img = img.resize((max_img_w, TARGET_HEIGHT), resample=Image.LANCZOS)
+        else:
+            img = img.resize((new_w, TARGET_HEIGHT), resample=Image.LANCZOS)
+        
+        # 그리드 정렬을 위해 max_img_w 사이즈의 흰색 캔버스에 센터링
+        bg = Image.new("RGBA", (max_img_w, TARGET_HEIGHT), "WHITE")
+        offset_x = (max_img_w - img.size[0]) // 2
+        bg.paste(img, (offset_x, 0), img)
+        row_data.append({'img': bg.convert("RGB")})
     
     # 3. 레이아웃 높이 계산
     calendar.setfirstweekday(calendar.SUNDAY)
     cal_matrix = calendar.monthcalendar(current_year, current_month)
     row_height = 30
-    CALENDAR_HEIGHT = row_height + (len(cal_matrix) * row_height) + 15 
+    CALENDAR_HEIGHT = row_height + (len(cal_matrix) * row_height) + 10 
     
-    overall_stat_rows = ((len(sorted_chs) - 1) // 3) + 1 if sorted_chs else 0
-    OVERALL_HEIGHT = max(CALENDAR_HEIGHT, overall_stat_rows * 35 + 10)
+    # 종합 타율 (2열 배치)
+    overall_stat_rows = ((len(sorted_chs) - 1) // 2) + 1 if sorted_chs else 0
+    OVERALL_HEIGHT = max(CALENDAR_HEIGHT, overall_stat_rows * 35)
 
     grid_rows = (len(row_data) + 1) // 2
-    GRID_HEIGHT = grid_rows * CELL_H
+    GRID_HEIGHT = grid_rows * TARGET_HEIGHT
 
+    # 질문 박스 여백 넉넉히 확보 (잘림 방지)
     q_lines = []
     q_height = 0
     if question_text:
-        wrapped = textwrap.fill(question_text, width=65) 
+        wrapped = textwrap.fill(question_text, width=60) 
         q_lines = wrapped.split('\n')
-        q_height = len(q_lines) * 40 + 20 
+        q_height = len(q_lines) * 40 + 50 
 
-    TOTAL_HEIGHT = HEADER_HEIGHT + OVERALL_HEIGHT + GRID_HEIGHT + q_height + 20
+    TOTAL_HEIGHT = HEADER_HEIGHT + OVERALL_HEIGHT + GRID_HEIGHT + q_height
 
     final_image = Image.new("RGB", (TOTAL_WIDTH, TOTAL_HEIGHT), "white")
     draw = ImageDraw.Draw(final_image)
@@ -311,9 +311,9 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     today = get_kst_now()
     today_display = today.strftime('%m/%d').lstrip("0").replace("/0", "/")
     title_text = f"{student_name} {today_display} 숙제 완료"
-    draw.text((10, 15), title_text, fill="black", font=font_title)
+    draw.text((20, 15), title_text, fill="black", font=font_title)
 
-    # [미니멀 달력 - 좌측 절반 한정]
+    # [미니멀 달력 - 좌측 절반]
     cal_start_y = HEADER_HEIGHT
     days_header = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
     cal_width = CENTER_X - 20 
@@ -321,80 +321,66 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     
     for i, day_str in enumerate(days_header):
         tw = draw.textlength(day_str, font=font_cal)
-        dx = 10 + i * col_spacing + (col_spacing - tw) / 2
+        dx = 20 + i * col_spacing + (col_spacing - tw) / 2
         draw.text((dx, cal_start_y), day_str, fill="#95A5A6", font=font_cal)
         
     cal_y = cal_start_y + row_height
     for week in cal_matrix:
         for i, day in enumerate(week):
             if day != 0:
-                dx = 10 + i * col_spacing
+                dx = 20 + i * col_spacing
                 dy = cal_y
                 day_str = str(day)
                 tw = draw.textlength(day_str, font=font_cal)
                 txt_x = dx + (col_spacing - tw) / 2
                 txt_y = dy + 5
 
+                is_today = (day == today.day and current_month == today.month and current_year == today.year)
+                
                 if day in attended_days:
-                    draw.rectangle([dx, dy, dx + col_spacing, dy + row_height], fill="#555555")
+                    # 과거 숙제는 연회색, 오늘 숙제는 붉은색 마킹
+                    bg_color = "#E74C3C" if is_today else "#95A5A6"
+                    draw.rectangle([dx, dy, dx + col_spacing, dy + row_height], fill=bg_color)
                     draw.text((txt_x, txt_y), day_str, fill="white", font=font_cal)
                 else:
                     draw.text((txt_x, txt_y), day_str, fill="black", font=font_cal)
         cal_y += row_height
 
-    # [종합 타율 - 우측 절반 배치]
-    stat_start_x = CENTER_X + 15
+    # [종합 타율 - 우측 절반 (2열 배치)]
+    stat_start_x = CENTER_X + 20
     stat_start_y = HEADER_HEIGHT
     for idx, ch in enumerate(sorted_chs):
-        col = idx % 3  # 3열 배치
-        row = idx // 3
-        x = stat_start_x + col * 115
+        col = idx % 2  # 2열 배치로 변경
+        row = idx // 2
+        x = stat_start_x + col * 160 # 간격 넓게
         y = stat_start_y + row * 35
         
         pct = overall_stats[ch]
         pct_color = "#E74C3C" if pct <= 20 else "#F39C12" if pct <= 60 else "black"
         
         draw.text((x, y), str(ch), fill="#95A5A6", font=font_overall)
-        draw.text((x + 55, y), f"{pct}%", fill=pct_color, font=font_overall)
+        draw.text((x + 60, y), f"{pct}%", fill=pct_color, font=font_overall)
 
-    # [그리드 렌더링 - 2열 초밀착 (가로선 모두 철거)]
-    grid_y_start = HEADER_HEIGHT + OVERALL_HEIGHT + 10
-    
-    # 정중앙 세로 구분선 (유일하게 남긴 선)
-    draw.line([(CENTER_X, grid_y_start), (CENTER_X, grid_y_start + GRID_HEIGHT)], fill="#ECF0F1", width=1)
+    # [그리드 렌더링 - 상하좌우 완전 밀착 (헤더/구분선 완전 삭제)]
+    # 달력과 이미지 사이의 여백(0)으로 밀착
+    grid_y_start = HEADER_HEIGHT + OVERALL_HEIGHT 
     
     for i, item in enumerate(row_data):
         r = i // 2
         c = i % 2
-        x_off = 10 if c == 0 else CENTER_X + 10
-        y_off = grid_y_start + r * CELL_H
+        # 좌우 여백 없이 밀착. 1열은 20부터, 2열은 바로 이어서 붙임
+        x_off = 20 if c == 0 else 20 + max_img_w
+        y_off = grid_y_start + r * TARGET_HEIGHT
         
-        badge_text = str(item['label'])
-        avg_pct = int(item['avg'] * 100)
-        pct_color = "#E74C3C" if avg_pct <= 20 else "#F39C12" if avg_pct <= 60 else "black"
-        hist_str = " ".join(item['hist'])
-
-        # 정보줄 렌더링 (배지 -> 타율 -> 히스토리)
-        bg_rgba = get_label_bg_rgba(badge_text)
-        bw = draw.textlength(badge_text, font=font_stat_pct) + 12
-        draw.rectangle([x_off, y_off, x_off + bw, y_off + 24], fill=bg_rgba)
-        draw.text((x_off + 6, y_off), badge_text, fill="white", font=font_stat_pct)
-        
-        avg_x = x_off + bw + 8
-        draw.text((avg_x, y_off), f"{avg_pct}%", fill=pct_color, font=font_stat_pct)
-        
-        hist_x = avg_x + draw.textlength(f"{avg_pct}%", font=font_stat_pct) + 10
-        draw.text((hist_x, y_off + 5), hist_str, fill="#95A5A6", font=font_stat_hist)
-
-        # 이미지 바로 밑에 밀착 렌더링
-        final_image.paste(item['img'], (x_off, y_off + CELL_HEADER_H))
+        # 이미지 렌더링 끝 (배지, OX 모두 생략)
+        final_image.paste(item['img'], (x_off, y_off))
 
     # [질문 렌더링]
     y_offset = grid_y_start + GRID_HEIGHT
     if question_text:
         text_y = y_offset + 10 
         for line in q_lines:
-            draw.text((10, text_y), line, fill="black", font=font_q)
+            draw.text((20, text_y), line, fill="black", font=font_q)
             text_y += 40
 
     buffered = BytesIO()
