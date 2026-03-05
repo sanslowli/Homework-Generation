@@ -221,7 +221,7 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
     return all_imgs[:n]
 
 # ==========================================
-# [로직] 결과 인증 이미지 생성 (초밀착 대칭 레이아웃)
+# [로직] 결과 인증 이미지 생성 (흑백 필터 & 초밀착 대칭 레이아웃)
 # ==========================================
 def get_label_bg_rgba(label_text: str):
     if label_text.startswith('1'): return (214, 82, 75, 180) 
@@ -231,7 +231,7 @@ def get_label_bg_rgba(label_text: str):
 def create_summary_image_base64(student_name, results_list, db_df, question_text, current_year, current_month, attended_days):
     TOTAL_WIDTH = 1140 
     TARGET_HEIGHT = 120   
-    CELL_HEADER_H = 36    
+    CELL_HEADER_H = 30    # (개선) 정보줄 높이를 36에서 30으로 압축하여 위아래 여백 최소화
     CELL_H = TARGET_HEIGHT + CELL_HEADER_H 
     HEADER_HEIGHT = 90
     CENTER_X = TOTAL_WIDTH // 2  
@@ -239,10 +239,7 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     try:
         font_title = ImageFont.truetype(FONT_PATH, 48)
         font_cal = ImageFont.truetype(FONT_PATH, 24)
-        
-        # 1. Batting Average 관련 폰트 스케일 다운 (36 -> 30)
         font_overall = ImageFont.truetype(FONT_PATH, 30) 
-        
         font_q = ImageFont.truetype(FONT_PATH, 42) 
         font_info = ImageFont.truetype(FONT_PATH, 24) 
     except:
@@ -275,6 +272,7 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     
     for r in results_list:
         p = r['file']
+        res = r['result'] # 현재 결과가 X인지 확인용
         try:
             img = Image.open(p).convert("RGBA")
             scale = TARGET_HEIGHT / img.size[1]
@@ -288,9 +286,13 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             bg = Image.new("RGB", img.size, "WHITE")
             bg.paste(img, (0, 0), img)
             
+            # (개선) 틀린(X) 이미지는 흑백(Grayscale) 처리! 흰 바탕은 그대로 흰색 유지
+            if res == 'X':
+                bg = bg.convert("L").convert("RGB")
+            
             label = os.path.basename(os.path.dirname(p))
             _, hist = calculate_batting_average(db_df, student_name, p)
-            hist.append(r['result'])
+            hist.append(res)
             hist = hist[-5:] 
             avg = hist.count('O') / len(hist)
             
@@ -306,7 +308,6 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     CALENDAR_HEIGHT = cal_row_height + (len(cal_matrix) * cal_row_height) + 15 
     
     overall_stat_rows = ((len(sorted_chs) - 1) // 2) + 1 if sorted_chs else 0
-    # 폰트가 작아졌으므로 줄간격 52 -> 45로 타이트하게 축소, 타이틀 여백 50
     OVERALL_HEIGHT = max(CALENDAR_HEIGHT, 50 + overall_stat_rows * 45) 
 
     grid_rows = (len(row_data) + 1) // 2
@@ -368,13 +369,12 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     
     draw.text((stat_start_x, stat_start_y), "Batting Average", fill="#95A5A6", font=font_overall)
     
-    # 간격 축소 50
     stat_data_y = stat_start_y + 50
     for idx, ch in enumerate(sorted_chs):
         col = idx % 2 
         row = idx // 2
         x = stat_start_x + col * 240 
-        y = stat_data_y + row * 45 # 간격 축소 45
+        y = stat_data_y + row * 45 
         
         pct = overall_stats[ch]
         pct_color = "#E74C3C" if pct <= 20 else "#F39C12" if pct <= 60 else "black"
@@ -396,18 +396,18 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
         badge_text = str(item['label'])
         avg_pct = int(item['avg'] * 100)
         
-        # 2. 배지 텍스트 수직 밸런스 조정 (기존 y_off + 4 -> y_off + 1 로 살짝 위로 당김)
+        # 1) 배지(챕터 번호) 그리기 (높이 30px 적용, y_off+1 로 상하 정중앙 밸런스 완벽 교정)
         bg_rgba = get_label_bg_rgba(badge_text)
         bw = draw.textlength(badge_text, font=font_info) + 16
         draw.rectangle([x_off, y_off, x_off + bw, y_off + CELL_HEADER_H], fill=bg_rgba)
         draw.text((x_off + 8, y_off + 1), badge_text, fill="white", font=font_info)
         
-        # 타율 (%) 그리기
+        # 2) 타율 (%) 그리기
         pct_str = f"{avg_pct}%"
         pct_w = draw.textlength(pct_str, font=font_info)
-        draw.text((x_off + bw + 15, y_off + 4), pct_str, fill="#95A5A6", font=font_info)
+        draw.text((x_off + bw + 15, y_off + 3), pct_str, fill="#95A5A6", font=font_info)
         
-        # 3. O/X 히스토리 그리기 (마지막 오답 붉은색 하이라이트 로직 적용)
+        # 3) O/X 히스토리 그리기 
         hist_start_x = x_off + bw + 15 + pct_w + 20
         hist_list = item['hist']
         current_x = hist_start_x
@@ -417,11 +417,10 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             # 마지막 글자가 X일 때만 붉은색, 나머지는 연회색
             char_color = "#E74C3C" if (is_last_item and char == 'X') else "#95A5A6"
             
-            draw.text((current_x, y_off + 4), char, fill=char_color, font=font_info)
-            # 글자 길이 + 적당한 여백(6px) 더해서 다음 글자 위치 잡기
+            draw.text((current_x, y_off + 3), char, fill=char_color, font=font_info)
             current_x += draw.textlength(char, font=font_info) + 6
 
-        # 이미지 붙여넣기 
+        # 4) 이미지 붙여넣기 (정보줄 30px 바로 아래 밀착, 틈 0)
         final_image.paste(item['img'], (x_off, y_off + CELL_HEADER_H))
 
     # [질문 렌더링]
@@ -465,7 +464,7 @@ if all_students_info:
         folder_name, student_name = selected_data
         chapter_list = get_chapters(folder_name, student_name)
         if chapter_list:
-            selected_chapters = st.sidebar.multiselect("챕터 선택 (일반 연습용)", chapter_list, format_func=lambda x: x[1])
+            selected_chapters = st.sidebar.multiselect("챕터 선택 (복수 선택 가능)", chapter_list, format_func=lambda x: x[1])
             
             if st.sidebar.button("훈련 시작 (Start)", use_container_width=True) and selected_chapters:
                 all_images = []
@@ -570,8 +569,10 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                 st.rerun()
 
     else:
+        # [MODIFIED] 연습 모드 끝에 도달하면 무한 반복 (리셔플 & 0번 인덱스 리셋)
         if is_practice:
-            st.session_state['mode'] = 'daily_result' if is_daily else 'setup'
+            random.shuffle(st.session_state['playlist'])
+            st.session_state['current_index'] = 0
             st.rerun()
         else:
             if is_daily:
