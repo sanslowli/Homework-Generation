@@ -392,7 +392,9 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
         y_off = grid_y_start + r * CELL_H
         
         badge_text = str(item['label'])
-        text_y_align = y_off - 3
+        
+        # [수정] 텍스트가 위로 너무 붙어보이는 현상 교정: y_off - 3 에서 y_off - 2로 1픽셀 하강
+        text_y_align = y_off - 2
         
         # 1) 배지(챕터 번호) 그리기
         bg_rgba = get_label_bg_rgba(badge_text)
