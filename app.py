@@ -221,7 +221,7 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
     return all_imgs[:n]
 
 # ==========================================
-# [로직] 결과 인증 이미지 생성 (정보줄 부활 & 1.5배 고화질)
+# [로직] 결과 인증 이미지 생성 (초밀착 대칭 레이아웃)
 # ==========================================
 def get_label_bg_rgba(label_text: str):
     if label_text.startswith('1'): return (214, 82, 75, 180) 
@@ -231,23 +231,21 @@ def get_label_bg_rgba(label_text: str):
 def create_summary_image_base64(student_name, results_list, db_df, question_text, current_year, current_month, attended_days):
     TOTAL_WIDTH = 1140 
     TARGET_HEIGHT = 120   # 훈련 이미지 자체의 높이
-    CELL_HEADER_H = 36    # 이미지 위 정보줄(챕터, 타율, OX) 영역의 높이
-    CELL_H = TARGET_HEIGHT + CELL_HEADER_H + 10 # 한 칸의 총 세로 높이
+    CELL_HEADER_H = 36    # 정보줄(배지/타율) 영역 높이
+    CELL_H = TARGET_HEIGHT + CELL_HEADER_H # 여백(Gap) 제거! 위 이미지 바닥과 완벽히 맞닿음
     HEADER_HEIGHT = 90
-    CENTER_X = TOTAL_WIDTH // 2  # 570 
+    CENTER_X = TOTAL_WIDTH // 2  # 570
     
     try:
         font_title = ImageFont.truetype(FONT_PATH, 48)
         font_cal = ImageFont.truetype(FONT_PATH, 24)
         font_overall = ImageFont.truetype(FONT_PATH, 36) 
         font_q = ImageFont.truetype(FONT_PATH, 42) 
-        
-        # 챕터, 타율, O/X 폰트 크기를 완벽하게 일치시킴 (사이즈 24)
         font_info = ImageFont.truetype(FONT_PATH, 24) 
     except:
         font_title = font_cal = font_overall = font_q = font_info = ImageFont.load_default()
 
-    # 1. 종합 타율 계산 (과거 DB + 현재 세션 실시간 합산)
+    # 1. 종합 타율 계산
     overall_counts = {}
     if not db_df.empty:
         student_df = db_df[(db_df['Student'] == student_name) & (db_df['Result'].isin(['O', 'X']))]
@@ -271,7 +269,7 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     sorted_chs = sorted(overall_stats.keys())
 
     # 2. 이미지 리사이징 
-    max_col_w = CENTER_X - 30 
+    max_col_w = CENTER_X - 30  # 좌우 대칭을 위한 최대 540폭
     row_data = []
     
     for r in results_list:
@@ -289,7 +287,6 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             bg = Image.new("RGB", img.size, "WHITE")
             bg.paste(img, (0, 0), img)
             
-            # 정보줄(챕터, 타율)에 쓰일 데이터도 같이 추출
             label = os.path.basename(os.path.dirname(p))
             _, hist = calculate_batting_average(db_df, student_name, p)
             hist.append(r['result'])
@@ -308,7 +305,6 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     cal_row_height = 45 
     CALENDAR_HEIGHT = cal_row_height + (len(cal_matrix) * cal_row_height) + 15 
     
-    # 종합 타율 섹션: 타이틀('종합 타율')을 위한 추가 공간(60px) 반영
     overall_stat_rows = ((len(sorted_chs) - 1) // 2) + 1 if sorted_chs else 0
     OVERALL_HEIGHT = max(CALENDAR_HEIGHT, 60 + overall_stat_rows * 52) 
 
@@ -365,14 +361,13 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
                     draw.text((txt_x, txt_y), day_str, fill="black", font=font_cal)
         cal_y += cal_row_height
 
-    # [종합 타율 - 우측 2열 (타이틀 추가)]
+    # [종합 타율 - 우측 2열 배치]
     stat_start_x = CENTER_X + 30
     stat_start_y = HEADER_HEIGHT
     
-    # '종합 타율' 제목 달기
-    draw.text((stat_start_x, stat_start_y), "종합 타율", fill="black", font=font_overall)
+    # 영문 명칭 및 회색 톤다운
+    draw.text((stat_start_x, stat_start_y), "Batting Average", fill="#95A5A6", font=font_overall)
     
-    # 데이터는 한 줄 아래(+60)부터 시작
     stat_data_y = stat_start_y + 60
     for idx, ch in enumerate(sorted_chs):
         col = idx % 2 
@@ -383,39 +378,41 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
         pct = overall_stats[ch]
         pct_color = "#E74C3C" if pct <= 20 else "#F39C12" if pct <= 60 else "black"
         
-        draw.text((x, y), str(ch), fill="#95A5A6", font=font_overall)
-        draw.text((x + 90, y), f"{pct}%", fill=pct_color, font=font_overall)
+        ch_text = str(ch)
+        tw = draw.textlength(ch_text, font=font_overall)
+        draw.text((x, y), ch_text, fill="#95A5A6", font=font_overall)
+        # 동적 여백 계산으로 붙어보이는 문제 해결
+        draw.text((x + tw + 15, y), f"{pct}%", fill=pct_color, font=font_overall)
 
-    # [그리드 이미지 렌더링 - 챕터/타율/OX 정보줄 포함]
+    # [그리드 이미지 렌더링 - 간격 제로, 정중앙 정렬, 타율 회색 통일]
     grid_y_start = HEADER_HEIGHT + OVERALL_HEIGHT 
     
     for i, item in enumerate(row_data):
         r = i // 2
         c = i % 2
-        x_off = 30 if c == 0 else CENTER_X + 30
+        # 좌우 완벽 대칭! 1열은 30에서, 2열은 정중앙(570)에서 정확히 시작
+        x_off = 30 if c == 0 else CENTER_X
         y_off = grid_y_start + r * CELL_H
         
-        # 정보 변수 준비
         badge_text = str(item['label'])
         avg_pct = int(item['avg'] * 100)
-        pct_color = "#E74C3C" if avg_pct <= 20 else "#F39C12" if avg_pct <= 60 else "black"
         hist_str = " ".join(item['hist'])
         
-        # 1) 배지(챕터 번호) 그리기
+        # 1) 배지(챕터 번호) 그리기 (Gap 없이 36px 꽉 채움)
         bg_rgba = get_label_bg_rgba(badge_text)
         bw = draw.textlength(badge_text, font=font_info) + 16
-        draw.rectangle([x_off, y_off, x_off + bw, y_off + 34], fill=bg_rgba)
-        draw.text((x_off + 8, y_off + 3), badge_text, fill="white", font=font_info)
+        draw.rectangle([x_off, y_off, x_off + bw, y_off + CELL_HEADER_H], fill=bg_rgba)
+        draw.text((x_off + 8, y_off + 4), badge_text, fill="white", font=font_info)
         
-        # 2) 타율 (%) 그리기
+        # 2) 타율 (%) 그리기 (히스토리와 동일한 무채색 회색 적용)
         pct_str = f"{avg_pct}%"
         pct_w = draw.textlength(pct_str, font=font_info)
-        draw.text((x_off + bw + 15, y_off + 3), pct_str, fill=pct_color, font=font_info)
+        draw.text((x_off + bw + 15, y_off + 4), pct_str, fill="#95A5A6", font=font_info)
         
         # 3) O/X 히스토리 그리기
-        draw.text((x_off + bw + 15 + pct_w + 20, y_off + 3), hist_str, fill="#95A5A6", font=font_info)
+        draw.text((x_off + bw + 15 + pct_w + 20, y_off + 4), hist_str, fill="#95A5A6", font=font_info)
 
-        # 4) 이미지 붙여넣기 (정보줄 바로 아래 밀착)
+        # 4) 이미지 붙여넣기 (정보줄 36px 바로 아래 밀착, 틈 0)
         final_image.paste(item['img'], (x_off, y_off + CELL_HEADER_H))
 
     # [질문 렌더링]
