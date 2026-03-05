@@ -221,7 +221,7 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
     return all_imgs[:n]
 
 # ==========================================
-# [로직] 결과 인증 이미지 생성 (흑백 필터 & 초밀착 대칭 레이아웃)
+# [로직] 결과 인증 이미지 생성 (흑백 필터 & 초밀착 픽셀 교정)
 # ==========================================
 def get_label_bg_rgba(label_text: str):
     if label_text.startswith('1'): return (214, 82, 75, 180) 
@@ -231,7 +231,7 @@ def get_label_bg_rgba(label_text: str):
 def create_summary_image_base64(student_name, results_list, db_df, question_text, current_year, current_month, attended_days):
     TOTAL_WIDTH = 1140 
     TARGET_HEIGHT = 120   
-    CELL_HEADER_H = 30    # (개선) 정보줄 높이를 36에서 30으로 압축하여 위아래 여백 최소화
+    CELL_HEADER_H = 30    
     CELL_H = TARGET_HEIGHT + CELL_HEADER_H 
     HEADER_HEIGHT = 90
     CENTER_X = TOTAL_WIDTH // 2  
@@ -272,7 +272,7 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     
     for r in results_list:
         p = r['file']
-        res = r['result'] # 현재 결과가 X인지 확인용
+        res = r['result'] 
         try:
             img = Image.open(p).convert("RGBA")
             scale = TARGET_HEIGHT / img.size[1]
@@ -286,7 +286,6 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             bg = Image.new("RGB", img.size, "WHITE")
             bg.paste(img, (0, 0), img)
             
-            # (개선) 틀린(X) 이미지는 흑백(Grayscale) 처리! 흰 바탕은 그대로 흰색 유지
             if res == 'X':
                 bg = bg.convert("L").convert("RGB")
             
@@ -384,7 +383,7 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
         draw.text((x, y), ch_text, fill="#95A5A6", font=font_overall)
         draw.text((x + tw + 15, y), f"{pct}%", fill=pct_color, font=font_overall)
 
-    # [그리드 이미지 렌더링 - 챕터/타율/OX 정보줄 포함]
+    # [그리드 이미지 렌더링 - 픽셀 정밀 교정]
     grid_y_start = HEADER_HEIGHT + OVERALL_HEIGHT 
     
     for i, item in enumerate(row_data):
@@ -396,31 +395,33 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
         badge_text = str(item['label'])
         avg_pct = int(item['avg'] * 100)
         
-        # 1) 배지(챕터 번호) 그리기 (높이 30px 적용, y_off+1 로 상하 정중앙 밸런스 완벽 교정)
+        # [교정] 박스 안의 텍스트가 바닥으로 쳐지는 현상 방지: 위로 -3px 끌어올림
+        text_y_align = y_off - 3
+        
+        # 1) 배지(챕터 번호) 
         bg_rgba = get_label_bg_rgba(badge_text)
         bw = draw.textlength(badge_text, font=font_info) + 16
         draw.rectangle([x_off, y_off, x_off + bw, y_off + CELL_HEADER_H], fill=bg_rgba)
-        draw.text((x_off + 8, y_off + 1), badge_text, fill="white", font=font_info)
+        draw.text((x_off + 8, text_y_align), badge_text, fill="white", font=font_info)
         
-        # 2) 타율 (%) 그리기
+        # 2) 타율 (%) (배지와 동일한 높이 적용)
         pct_str = f"{avg_pct}%"
         pct_w = draw.textlength(pct_str, font=font_info)
-        draw.text((x_off + bw + 15, y_off + 3), pct_str, fill="#95A5A6", font=font_info)
+        draw.text((x_off + bw + 15, text_y_align), pct_str, fill="#95A5A6", font=font_info)
         
-        # 3) O/X 히스토리 그리기 
+        # 3) O/X 히스토리 그리기 (마지막 오답 붉은색 하이라이트 유지, 배지와 동일한 높이 적용)
         hist_start_x = x_off + bw + 15 + pct_w + 20
         hist_list = item['hist']
         current_x = hist_start_x
         
         for idx_h, char in enumerate(hist_list):
             is_last_item = (idx_h == len(hist_list) - 1)
-            # 마지막 글자가 X일 때만 붉은색, 나머지는 연회색
             char_color = "#E74C3C" if (is_last_item and char == 'X') else "#95A5A6"
             
-            draw.text((current_x, y_off + 3), char, fill=char_color, font=font_info)
+            draw.text((current_x, text_y_align), char, fill=char_color, font=font_info)
             current_x += draw.textlength(char, font=font_info) + 6
 
-        # 4) 이미지 붙여넣기 (정보줄 30px 바로 아래 밀착, 틈 0)
+        # 4) 이미지 붙여넣기 
         final_image.paste(item['img'], (x_off, y_off + CELL_HEADER_H))
 
     # [질문 렌더링]
@@ -569,7 +570,6 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                 st.rerun()
 
     else:
-        # [MODIFIED] 연습 모드 끝에 도달하면 무한 반복 (리셔플 & 0번 인덱스 리셋)
         if is_practice:
             random.shuffle(st.session_state['playlist'])
             st.session_state['current_index'] = 0
