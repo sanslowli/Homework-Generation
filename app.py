@@ -221,7 +221,7 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
     return all_imgs[:n]
 
 # ==========================================
-# [로직] 결과 인증 이미지 생성 (흑백 필터 & 초밀착 대칭 레이아웃)
+# [로직] 결과 인증 이미지 생성
 # ==========================================
 def get_label_bg_rgba(label_text: str):
     if label_text.startswith('1'): return (214, 82, 75, 180) 
@@ -231,7 +231,7 @@ def get_label_bg_rgba(label_text: str):
 def create_summary_image_base64(student_name, results_list, db_df, question_text, current_year, current_month, attended_days):
     TOTAL_WIDTH = 1140 
     TARGET_HEIGHT = 120   
-    CELL_HEADER_H = 30    # (개선) 정보줄 높이를 36에서 30으로 압축하여 위아래 여백 최소화
+    CELL_HEADER_H = 30    
     CELL_H = TARGET_HEIGHT + CELL_HEADER_H 
     HEADER_HEIGHT = 90
     CENTER_X = TOTAL_WIDTH // 2  
@@ -272,7 +272,7 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     
     for r in results_list:
         p = r['file']
-        res = r['result'] # 현재 결과가 X인지 확인용
+        res = r['result'] 
         try:
             img = Image.open(p).convert("RGBA")
             scale = TARGET_HEIGHT / img.size[1]
@@ -286,7 +286,6 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             bg = Image.new("RGB", img.size, "WHITE")
             bg.paste(img, (0, 0), img)
             
-            # (개선) 틀린(X) 이미지는 흑백(Grayscale) 처리! 흰 바탕은 그대로 흰색 유지
             if res == 'X':
                 bg = bg.convert("L").convert("RGB")
             
@@ -294,11 +293,9 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             _, hist = calculate_batting_average(db_df, student_name, p)
             hist.append(res)
             hist = hist[-5:] 
-            avg = hist.count('O') / len(hist)
             
             row_data.append({
-                'img': bg, 'label': label, 
-                'avg': avg, 'hist': hist
+                'img': bg, 'label': label, 'hist': hist
             })
         except: continue
     
@@ -328,7 +325,8 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
     # [헤더]
     today = get_kst_now()
     today_display = today.strftime('%m/%d').lstrip("0").replace("/0", "/")
-    title_text = f"{student_name} {today_display} 숙제 완료"
+    # 제목에 숙제 완료 및 체크 마크 추가
+    title_text = f"{student_name} {today_display} 숙제 완료 ✔"
     draw.text((30, 22), title_text, fill="black", font=font_title)
 
     # [달력 - 좌측]
@@ -384,7 +382,7 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
         draw.text((x, y), ch_text, fill="#95A5A6", font=font_overall)
         draw.text((x + tw + 15, y), f"{pct}%", fill=pct_color, font=font_overall)
 
-    # [그리드 이미지 렌더링 - 챕터/타율/OX 정보줄 포함]
+    # [그리드 이미지 렌더링]
     grid_y_start = HEADER_HEIGHT + OVERALL_HEIGHT 
     
     for i, item in enumerate(row_data):
@@ -394,33 +392,27 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
         y_off = grid_y_start + r * CELL_H
         
         badge_text = str(item['label'])
-        avg_pct = int(item['avg'] * 100)
+        text_y_align = y_off - 3
         
-        # 1) 배지(챕터 번호) 그리기 (높이 30px 적용, y_off+1 로 상하 정중앙 밸런스 완벽 교정)
+        # 1) 배지(챕터 번호) 그리기
         bg_rgba = get_label_bg_rgba(badge_text)
         bw = draw.textlength(badge_text, font=font_info) + 16
         draw.rectangle([x_off, y_off, x_off + bw, y_off + CELL_HEADER_H], fill=bg_rgba)
-        draw.text((x_off + 8, y_off + 1), badge_text, fill="white", font=font_info)
+        draw.text((x_off + 8, text_y_align), badge_text, fill="white", font=font_info)
         
-        # 2) 타율 (%) 그리기
-        pct_str = f"{avg_pct}%"
-        pct_w = draw.textlength(pct_str, font=font_info)
-        draw.text((x_off + bw + 15, y_off + 3), pct_str, fill="#95A5A6", font=font_info)
-        
-        # 3) O/X 히스토리 그리기 
-        hist_start_x = x_off + bw + 15 + pct_w + 20
+        # 2) O/X 히스토리 그리기 (구간 타율 삭제, 배지 바로 옆 15px 여백 후 밀착)
+        hist_start_x = x_off + bw + 15
         hist_list = item['hist']
         current_x = hist_start_x
         
         for idx_h, char in enumerate(hist_list):
             is_last_item = (idx_h == len(hist_list) - 1)
-            # 마지막 글자가 X일 때만 붉은색, 나머지는 연회색
             char_color = "#E74C3C" if (is_last_item and char == 'X') else "#95A5A6"
             
-            draw.text((current_x, y_off + 3), char, fill=char_color, font=font_info)
+            draw.text((current_x, text_y_align), char, fill=char_color, font=font_info)
             current_x += draw.textlength(char, font=font_info) + 6
 
-        # 4) 이미지 붙여넣기 (정보줄 30px 바로 아래 밀착, 틈 0)
+        # 3) 이미지 붙여넣기 
         final_image.paste(item['img'], (x_off, y_off + CELL_HEADER_H))
 
     # [질문 렌더링]
@@ -464,7 +456,7 @@ if all_students_info:
         folder_name, student_name = selected_data
         chapter_list = get_chapters(folder_name, student_name)
         if chapter_list:
-            selected_chapters = st.sidebar.multiselect("챕터 선택 (일반 연습용)", chapter_list, format_func=lambda x: x[1])
+            selected_chapters = st.sidebar.multiselect("챕터 선택 (복수 선택 가능)", chapter_list, format_func=lambda x: x[1])
             
             if st.sidebar.button("훈련 시작 (Start)", use_container_width=True) and selected_chapters:
                 all_images = []
@@ -569,7 +561,6 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                 st.rerun()
 
     else:
-        # [MODIFIED] 연습 모드 끝에 도달하면 무한 반복 (리셔플 & 0번 인덱스 리셋)
         if is_practice:
             random.shuffle(st.session_state['playlist'])
             st.session_state['current_index'] = 0
