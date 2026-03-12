@@ -87,44 +87,48 @@
                 "X",
                 "X",
                 "X",
+                "X",
                 "X"
             ],
-            "total_attempts": 4,
+            "total_attempts": 5,
             "batting_average": 0.0,
-            "last_played": "2026-03-05 12:30:00"
+            "last_played": "2026-03-12 10:10:35"
         },
         "501S/1-1.png": {
             "recent_history": [
                 "X",
                 "X",
                 "X",
-                "X"
+                "X",
+                "O"
             ],
-            "total_attempts": 4,
-            "batting_average": 0.0,
-            "last_played": "2026-03-05 12:29:59"
+            "total_attempts": 5,
+            "batting_average": 0.2,
+            "last_played": "2026-03-12 10:12:15"
         },
         "501S/1-4.png": {
             "recent_history": [
                 "X",
                 "X",
                 "X",
-                "X"
+                "X",
+                "O"
             ],
-            "total_attempts": 4,
-            "batting_average": 0.0,
-            "last_played": "2026-03-05 12:30:00"
+            "total_attempts": 5,
+            "batting_average": 0.2,
+            "last_played": "2026-03-12 10:09:55"
         },
         "501S/1-2.png": {
             "recent_history": [
                 "X",
                 "X",
                 "X",
-                "X"
+                "X",
+                "O"
             ],
-            "total_attempts": 4,
-            "batting_average": 0.0,
-            "last_played": "2026-03-05 12:30:01"
+            "total_attempts": 5,
+            "batting_average": 0.2,
+            "last_played": "2026-03-12 10:11:04"
         }
     },
     "김예원": {
