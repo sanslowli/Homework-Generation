@@ -496,7 +496,8 @@ if st.session_state['mode'] == 'setup':
             db_df = st.session_state.get('db_data', pd.DataFrame())
             
             curr_imgs = get_daily_target_images(folder_name, student_name, "현행 챕터", 6, db_df)
-            past_imgs = get_daily_target_images(folder_name, student_name, "지난 챕터", 4, db_df)
+            shortfall = 6 - len(curr_imgs)  # 현행에서 못 채운 만큼 지난 챕터에서 보충
+            past_imgs = get_daily_target_images(folder_name, student_name, "지난 챕터", 4 + shortfall, db_df)
             
             daily_playlist = curr_imgs + past_imgs
             random.shuffle(daily_playlist)
