@@ -14,3 +14,6 @@ service_key.json
 __pycache__/
 *.pyc
 *.pyo
+
+# 5. Cowork (Claude) 내부 작업 파일 차단
+.claude/
