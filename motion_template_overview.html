@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>구간 스니펫 Motion 템플릿 개요</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f0f0f0;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    color: #1a1a1a;
+    padding: 40px 32px;
+  }
+
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+  .subtitle { font-size: 13px; color: #888; margin-bottom: 40px; letter-spacing: 0.5px; }
+
+  /* ── Section ── */
+  .section { margin-bottom: 48px; }
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #aaa;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #ddd;
+  }
+
+  /* ── 1. 화면 합성 ── */
+  .composite {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .comp-frame {
+    width: 200px;
+    height: 356px;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 2px solid #ccc;
+    position: relative;
+    background: #1a1a1a;
+    flex-shrink: 0;
+  }
+  .comp-video {
+    width: 100%; height: 55%;
+    background: linear-gradient(160deg, #3a5a7a 0%, #2a3a4a 100%);
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 6px;
+  }
+  .comp-video .person {
+    font-size: 44px;
+  }
+  .comp-video .label {
+    font-size: 10px; color: #ffffff80; letter-spacing: 1px;
+  }
+  .comp-card-area {
+    width: 100%; height: 45%;
+    background: #faf8f3;
+    padding: 8px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 4px;
+  }
+  .cell {
+    background: white;
+    border: 1.5px solid #e0e0e0;
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 7px;
+    color: #999;
+    text-align: center;
+    padding: 2px;
+    line-height: 1.3;
+  }
+  .cell.active {
+    border: 2.5px solid #FF6B35;
+    background: #fff5f0;
+    color: #FF6B35;
+    font-weight: 700;
+    box-shadow: 0 0 8px #FF6B3540;
+  }
+  .cell.done {
+    background: #f0f0f0;
+    color: #bbb;
+  }
+
+  /* 화살표 */
+  .arrow { font-size: 28px; color: #ccc; }
+
+  /* 레이어 설명 */
+  .comp-desc {
+    flex: 1;
+    min-width: 220px;
+  }
+  .comp-desc h3 { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+  .comp-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .badge {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .badge-fixed  { background: #e8f4e8; color: #2a7a2a; }
+  .badge-drop   { background: #e8eef8; color: #2a4a9a; }
+  .badge-key    { background: #fff0e8; color: #9a4a1a; }
+  .badge-pub    { background: #f8e8f8; color: #7a1a9a; }
+
+  .comp-item p { font-size: 12px; color: #555; line-height: 1.5; }
+  .comp-item strong { color: #222; }
+
+  /* ── 2. 레이어 스택 ── */
+  .layer-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-width: 620px;
+  }
+  .layer {
+    display: flex;
+    align-items: center;
+    padding: 11px 16px;
+    border: 1.5px solid #ddd;
+    border-bottom: none;
+    background: white;
+    gap: 12px;
+  }
+  .layer:first-child { border-radius: 10px 10px 0 0; }
+  .layer:last-child  { border-radius: 0 0 10px 10px; border-bottom: 1.5px solid #ddd; }
+  .layer-icon { font-size: 18px; width: 28px; text-align: center; flex-shrink: 0; }
+  .layer-name { font-size: 13px; font-weight: 600; flex: 1; }
+  .layer-note { font-size: 11px; color: #888; }
+  .layer-tag  {
+    font-size: 10px; font-weight: 700; padding: 2px 7px;
+    border-radius: 3px; white-space: nowrap;
+  }
+
+  .l-highlight { background: #fff8f0; border-left: 4px solid #FF6B35; }
+  .l-card      { background: #f8fbff; border-left: 4px solid #4a90d9; }
+  .l-video     { background: #f8fff8; border-left: 4px solid #4aaa6a; }
+
+  /* ── 3. 타임라인 ── */
+  .timeline-wrap {
+    background: #1e1e2e;
+    border-radius: 12px;
+    padding: 20px 20px 24px;
+    max-width: 720px;
+  }
+  .tl-header {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 6px;
+    padding-left: 120px;
+  }
+  .tl-tick {
+    flex: 1;
+    font-size: 10px;
+    color: #555;
+    text-align: left;
+  }
+  .tl-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 7px;
+    gap: 0;
+  }
+  .tl-label {
+    width: 120px;
+    font-size: 11px;
+    color: #888;
+    flex-shrink: 0;
+    padding-right: 10px;
+    text-align: right;
+  }
+  .tl-track {
+    flex: 1;
+    height: 22px;
+    background: #2a2a3e;
+    border-radius: 4px;
+    position: relative;
+    overflow: visible;
+  }
+  .tl-bar {
+    position: absolute;
+    height: 100%;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    font-size: 9px;
+    font-weight: 700;
+    color: white;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .tl-divider {
+    position: absolute;
+    top: -4px; bottom: -4px;
+    width: 1px;
+    background: #444;
+  }
+
+  /* ── 4. 작업 분류 ── */
+  .work-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    max-width: 600px;
+  }
+  .work-box {
+    padding: 16px 18px;
+    border-radius: 10px;
+    border: 1.5px solid;
+  }
+  .work-once {
+    background: #f0faf0;
+    border-color: #a0d0a0;
+  }
+  .work-each {
+    background: #fff8f0;
+    border-color: #f0c080;
+  }
+  .work-box h4 {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+  }
+  .work-once h4 { color: #2a7a2a; }
+  .work-each h4 { color: #9a5a10; }
+  .work-box li {
+    font-size: 12px;
+    color: #444;
+    line-height: 1.6;
+    margin-left: 14px;
+    margin-bottom: 2px;
+  }
+
+  /* note */
+  .note {
+    font-size: 12px;
+    color: #888;
+    background: #f7f7f7;
+    border-left: 3px solid #ddd;
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    margin-top: 12px;
+    max-width: 620px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<h1>구간 스니펫 · Motion 템플릿 구조</h1>
+<p class="subtitle">Syntax Pitching™ Reels — 수강생 발화 장면 + 구간 카드 하이라이트</p>
+
+
+<!-- ── 섹션 1: 화면 합성 ── -->
+<div class="section">
+  <div class="section-title">01 · 최종 화면 합성 구조</div>
+  <div class="composite">
+
+    <!-- 프레임: 학생 영상만 -->
+    <div>
+      <div style="font-size:11px;color:#aaa;margin-bottom:6px;text-align:center;">📹 학생 영상 (원본)</div>
+      <div class="comp-frame">
+        <div class="comp-video" style="height:100%">
+          <div class="person">🧑‍💻</div>
+          <div class="label">RAW FOOTAGE</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">+</div>
+
+    <!-- 프레임: 카드만 -->
+    <div>
+      <div style="font-size:11px;color:#aaa;margin-bottom:6px;text-align:center;">🃏 구간 카드 이미지</div>
+      <div class="comp-frame" style="background:#faf8f3;">
+        <div class="comp-card-area" style="height:100%;width:100%;">
+          <div class="cell">He moved<br>to Seoul</div>
+          <div class="cell">She works<br>downtown</div>
+          <div class="cell">They left<br>early</div>
+          <div class="cell">I called<br>her back</div>
+          <div class="cell">We had<br>dinner</div>
+          <div class="cell">It was<br>so good</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">+</div>
+
+    <!-- 프레임: 하이라이트 레이어 -->
+    <div>
+      <div style="font-size:11px;color:#aaa;margin-bottom:6px;text-align:center;">✨ 하이라이트 레이어</div>
+      <div class="comp-frame" style="background:transparent;border-color:#FF6B3560;">
+        <div style="height:55%;"></div>
+        <div class="comp-card-area" style="background:transparent;">
+          <div class="cell" style="background:transparent;border-color:transparent;"></div>
+          <div class="cell" style="background:transparent;border-color:transparent;"></div>
+          <div class="cell active" style="font-size:8px;">← 현재 발화 중</div>
+          <div class="cell" style="background:transparent;border-color:transparent;"></div>
+          <div class="cell" style="background:transparent;border-color:transparent;"></div>
+          <div class="cell" style="background:transparent;border-color:transparent;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">=</div>
+
+    <!-- 프레임: 최종 합성 -->
+    <div>
+      <div style="font-size:11px;color:#aaa;margin-bottom:6px;text-align:center;">🎬 최종 출력</div>
+      <div class="comp-frame">
+        <div class="comp-video">
+          <div class="person">🧑‍💻</div>
+          <div class="label">STUDENT VIDEO</div>
+        </div>
+        <div class="comp-card-area">
+          <div class="cell done">He moved<br>to Seoul</div>
+          <div class="cell done">She works<br>downtown</div>
+          <div class="cell active">They left<br>early</div>
+          <div class="cell">I called<br>her back</div>
+          <div class="cell">We had<br>dinner</div>
+          <div class="cell">It was<br>so good</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 범례 -->
+    <div class="comp-desc">
+      <h3>레이어별 역할</h3>
+
+      <div class="comp-item">
+        <span class="badge badge-drop">DROP ZONE</span>
+        <p><strong>학생 영상</strong> — 매 릴스마다 교체. FCP에서 드래그만 하면 됩니다.</p>
+      </div>
+      <div class="comp-item">
+        <span class="badge badge-drop">DROP ZONE</span>
+        <p><strong>구간 카드 이미지</strong> — 촬영 구간에 맞는 이미지 교체. 위치·크기는 템플릿이 고정.</p>
+      </div>
+      <div class="comp-item">
+        <span class="badge badge-fixed">FIXED</span>
+        <p><strong>하이라이트 레이어</strong> — 테두리/밝기 효과 디자인은 한 번만 설정. 칸마다 개별 레이어 존재.</p>
+      </div>
+      <div class="comp-item">
+        <span class="badge badge-key">KEYFRAME</span>
+        <p><strong>하이라이트 타이밍</strong> — 발화 타이밍에 맞게 매 영상마다 수동 조정. 이게 유일한 반복 작업.</p>
+      </div>
+      <div class="comp-item">
+        <span class="badge badge-pub">PUBLISHED</span>
+        <p><strong>테두리 색상, 두께</strong> — FCP 인스펙터에서 Motion 없이 바로 수정 가능.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── 섹션 2: 레이어 스택 ── -->
+<div class="section">
+  <div class="section-title">02 · Motion 레이어 스택 (위 → 아래 = 앞 → 뒤)</div>
+  <div class="layer-stack">
+
+    <div class="layer l-highlight">
+      <div class="layer-icon">🟧</div>
+      <div class="layer-name">하이라이트 · 칸 3 <span style="font-weight:400;color:#aaa;font-size:11px">(Shape Layer)</span></div>
+      <div class="layer-note">현재 발화 중 → Opacity 100%</div>
+      <span class="layer-tag" style="background:#fff0e8;color:#c05010;">KEYFRAME</span>
+    </div>
+    <div class="layer l-highlight">
+      <div class="layer-icon">⬜</div>
+      <div class="layer-name">하이라이트 · 칸 2 <span style="font-weight:400;color:#aaa;font-size:11px">(Shape Layer)</span></div>
+      <div class="layer-note">발화 완료 → Opacity 20%</div>
+      <span class="layer-tag" style="background:#fff0e8;color:#c05010;">KEYFRAME</span>
+    </div>
+    <div class="layer l-highlight">
+      <div class="layer-icon">⬜</div>
+      <div class="layer-name">하이라이트 · 칸 1 <span style="font-weight:400;color:#aaa;font-size:11px">(Shape Layer)</span></div>
+      <div class="layer-note">발화 완료 → Opacity 20%</div>
+      <span class="layer-tag" style="background:#fff0e8;color:#c05010;">KEYFRAME</span>
+    </div>
+
+    <div class="layer l-card" style="border-top: 2px dashed #c0d0e8;">
+      <div class="layer-icon">🖼️</div>
+      <div class="layer-name">구간 카드 이미지 <span style="font-weight:400;color:#aaa;font-size:11px">(Drop Zone)</span></div>
+      <div class="layer-note">매 영상마다 이미지 교체</div>
+      <span class="layer-tag" style="background:#e8eef8;color:#2a4a9a;">DROP ZONE</span>
+    </div>
+
+    <div class="layer l-video">
+      <div class="layer-icon">📹</div>
+      <div class="layer-name">학생 영상 <span style="font-weight:400;color:#aaa;font-size:11px">(Drop Zone)</span></div>
+      <div class="layer-note">매 영상마다 클립 교체</div>
+      <span class="layer-tag" style="background:#e8f8e8;color:#2a7a2a;">DROP ZONE</span>
+    </div>
+
+  </div>
+
+  <div class="note">
+    💡 구간 칸 수가 6개라면 하이라이트 레이어도 6개. 칸 수가 달라지는 경우, 레이어 수가 다른 템플릿을 버전별로 만들어두면 됩니다 (3칸 버전, 4칸 버전, 6칸 버전 등).
+  </div>
+</div>
+
+
+<!-- ── 섹션 3: 타임라인 ── -->
+<div class="section">
+  <div class="section-title">03 · FCP 타임라인에서의 작업 이미지</div>
+  <div class="timeline-wrap">
+    <div class="tl-header">
+      <span class="tl-tick">0s</span>
+      <span class="tl-tick">3s</span>
+      <span class="tl-tick">6s</span>
+      <span class="tl-tick">9s</span>
+      <span class="tl-tick">12s</span>
+      <span class="tl-tick">15s</span>
+    </div>
+
+    <!-- 학생 영상 -->
+    <div class="tl-row">
+      <div class="tl-label" style="color:#4aaa6a;">📹 학생 영상</div>
+      <div class="tl-track">
+        <div class="tl-bar" style="left:0;width:100%;background:#2a5a3a;">학생 발화 클립 (교체 가능)</div>
+      </div>
+    </div>
+
+    <!-- 카드 이미지 -->
+    <div class="tl-row">
+      <div class="tl-label" style="color:#4a90d9;">🖼️ 구간 카드</div>
+      <div class="tl-track">
+        <div class="tl-bar" style="left:0;width:100%;background:#2a4a7a;">구간 이미지 (교체 가능)</div>
+      </div>
+    </div>
+
+    <!-- 구분선 -->
+    <div style="border-top:1px dashed #3a3a5a;margin:6px 0 6px 120px;"></div>
+
+    <!-- 하이라이트 1 -->
+    <div class="tl-row">
+      <div class="tl-label" style="color:#FF6B35;font-size:10px;">🟧 하이라이트 칸1</div>
+      <div class="tl-track" style="background:#1a1a2e;">
+        <div class="tl-bar" style="left:0%;width:20%;background:#c04010;">발화 중</div>
+        <div class="tl-bar" style="left:20%;width:80%;background:#3a2010;opacity:0.6;">잔상 (20%)</div>
+      </div>
+    </div>
+
+    <!-- 하이라이트 2 -->
+    <div class="tl-row">
+      <div class="tl-label" style="color:#FF6B35;font-size:10px;">🟧 하이라이트 칸2</div>
+      <div class="tl-track" style="background:#1a1a2e;">
+        <div class="tl-bar" style="left:0%;width:20%;background:#1a1a2e;"></div>
+        <div class="tl-bar" style="left:20%;width:22%;background:#c04010;">발화 중</div>
+        <div class="tl-bar" style="left:42%;width:58%;background:#3a2010;opacity:0.6;">잔상</div>
+      </div>
+    </div>
+
+    <!-- 하이라이트 3 -->
+    <div class="tl-row">
+      <div class="tl-label" style="color:#FF6B35;font-size:10px;">🟧 하이라이트 칸3</div>
+      <div class="tl-track" style="background:#1a1a2e;">
+        <div class="tl-bar" style="left:0%;width:42%;background:#1a1a2e;"></div>
+        <div class="tl-bar" style="left:42%;width:20%;background:#c04010;">발화 중</div>
+        <div class="tl-bar" style="left:62%;width:38%;background:#3a2010;opacity:0.6;">잔상</div>
+      </div>
+    </div>
+
+    <div style="font-size:10px;color:#555;margin-top:12px;padding-left:120px;">
+      ← 빨간 구간: 하이라이트 ON (Opacity 100%) &nbsp;&nbsp; 어두운 구간: 잔상 (Opacity 20%) &nbsp;&nbsp; 빈 구간: OFF
+    </div>
+  </div>
+
+  <div class="note">
+    ⏱ 타이밍 키프레임 작업: 칸당 약 30초~1분. 6칸 기준 영상 한 편당 3~6분 예상. 구간 이미지 교체 + 영상 교체는 각 1분 이내.
+  </div>
+</div>
+
+
+<!-- ── 섹션 4: 작업 분류 ── -->
+<div class="section">
+  <div class="section-title">04 · 작업량 비교</div>
+  <div class="work-grid">
+    <div class="work-box work-once">
+      <h4>✅ 한 번만 (Motion)</h4>
+      <ul>
+        <li>화면 분할 레이아웃 설계</li>
+        <li>하이라이트 테두리 효과 디자인</li>
+        <li>Drop Zone 위치·크기 고정</li>
+        <li>Published Parameters 등록<br><span style="color:#aaa;font-size:11px">(색상, 두께, 투명도)</span></li>
+        <li>칸 버전별 템플릿 저장<br><span style="color:#aaa;font-size:11px">(3칸, 4칸, 6칸 등)</span></li>
+      </ul>
+    </div>
+    <div class="work-box work-each">
+      <h4>🔁 매 영상마다 (FCP)</h4>
+      <ul>
+        <li>학생 영상 클립 교체 <span style="color:#aaa">(Drop Zone)</span></li>
+        <li>구간 이미지 교체 <span style="color:#aaa">(Drop Zone)</span></li>
+        <li>각 칸 하이라이트 타이밍 조정<br><span style="color:#aaa;font-size:11px">(발화 속도가 매번 다르므로 불가피)</span></li>
+      </ul>
+      <div style="margin-top:10px;padding:8px;background:#fff3e0;border-radius:6px;font-size:11px;color:#7a4a10;">
+        기존 대비 시각 세팅 작업 약 <strong>70% 제거</strong> 예상
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
