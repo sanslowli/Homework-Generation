@@ -199,7 +199,7 @@ def calculate_batting_average(df, student, image_path):
 def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
     target_path = os.path.join(BASE_FOLDER, folder_name, student_name, subfolder)
     if not os.path.exists(target_path): return []
-    
+
     all_imgs = []
     for root, _, files in os.walk(target_path):
         root_nfc = unicodedata.normalize('NFC', root)
@@ -207,17 +207,32 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
         for f in files:
             if f.lower().endswith(('.png', '.jpg', '.jpeg')):
                 all_imgs.append(os.path.join(root, f))
-                
+
     if not all_imgs: return []
-    
+
     counts = {}
+    batting_avgs = {}
     if not db_df.empty:
         student_data = db_df[db_df['Student'] == student_name]
         counts = student_data['Image'].value_counts().to_dict()
-        
-    def get_count(img_path): return counts.get(os.path.basename(img_path), 0)
-    random.shuffle(all_imgs) 
-    all_imgs.sort(key=get_count) 
+        # 이미지별 최근 5회 타율 계산
+        for img_path in all_imgs:
+            img_name = os.path.basename(img_path)
+            img_results = student_data[student_data['Image'] == img_name]['Result'].tail(5).tolist()
+            if img_results:
+                batting_avgs[img_name] = img_results.count('O') / len(img_results)
+
+    max_count = max(counts.values()) if counts else 1
+
+    def priority_score(img_path):
+        img_name = os.path.basename(img_path)
+        avg = batting_avgs.get(img_name, 0.5)          # 미출제 이미지는 중립값 0.5
+        count = counts.get(img_name, 0)
+        norm_count = count / max_count                  # 0.0 ~ 1.0 정규화
+        return avg * 0.7 + norm_count * 0.3             # 타율 70%, 출제횟수 30% 가중치
+
+    random.shuffle(all_imgs)                            # 동점 처리용 사전 셔플
+    all_imgs.sort(key=priority_score)                   # 점수 낮을수록(약점+미출제) 우선
     return all_imgs[:n]
 
 # ==========================================
