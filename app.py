@@ -226,8 +226,15 @@ def get_daily_target_images(folder_name, student_name, subfolder, n, db_df):
 
     def priority_score(img_path):
         img_name = os.path.basename(img_path)
-        avg = batting_avgs.get(img_name, 0.5)          # 미출제 이미지는 중립값 0.5
         count = counts.get(img_name, 0)
+
+        # 5회 미만 출제 → 타율 계산 신뢰도 없음 → 데이터 수집 우선 구간
+        # 점수: 0회=-1.0, 1회=-0.9, 2회=-0.8, 3회=-0.7, 4회=-0.6 → 무조건 상위권
+        if count < 5:
+            return -1 + (count * 0.1)
+
+        # 5회 이상 → 타율 유효 → 정상 가중치 적용
+        avg = batting_avgs.get(img_name, 0.5)
         norm_count = count / max_count                  # 0.0 ~ 1.0 정규화
         return avg * 0.7 + norm_count * 0.3             # 타율 70%, 출제횟수 30% 가중치
 
