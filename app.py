@@ -460,9 +460,189 @@ st.sidebar.markdown('<div class="sidebar-title">Syntax Pitching™</div>', unsaf
 
 query_params = st.query_params
 url_student = query_params.get("student")
+url_teacher = query_params.get("teacher")
 
 all_students_info = get_all_students()
 selected_data = None
+
+# ==========================================
+# [Teacher Mode] 선생님용 대시보드 (?teacher=1)
+# ==========================================
+if url_teacher == "1":
+    st.sidebar.markdown(
+        '<div style="background:#E74C3C;color:white;padding:8px 12px;border-radius:6px;'
+        'font-weight:700;text-align:center;margin-bottom:20px;">🎓 TEACHER MODE</div>',
+        unsafe_allow_html=True
+    )
+    st.title("🎓 Teacher Dashboard")
+    st.caption("Syntax Pitching™ — 수강생 진도 · 타율 · 출석 현황")
+
+    if not client:
+        st.error("구글 시트 연결 실패")
+        st.stop()
+    if not all_students_info:
+        st.warning("등록된 학생이 없습니다.")
+        st.stop()
+
+    db_df_t = get_data_from_sheet(client)
+
+    # 학생 선택
+    t_selected = st.selectbox(
+        "학생 선택",
+        all_students_info,
+        format_func=lambda x: f"{x[1]}  ·  {x[0]}"
+    )
+
+    if t_selected:
+        t_folder, t_student = t_selected
+        t_chapters = get_chapters(t_folder, t_student)
+
+        # 학생 전체 통계
+        s_df = db_df_t[(db_df_t['Student'] == t_student) & (db_df_t['Result'].isin(['O', 'X']))] if not db_df_t.empty else pd.DataFrame()
+        total_attempts = len(s_df)
+        total_O = int((s_df['Result'] == 'O').sum()) if total_attempts else 0
+        overall_avg = (total_O / total_attempts * 100) if total_attempts else 0.0
+        last_ts = s_df['Timestamp'].max() if total_attempts else None
+        last_activity = last_ts[:10] if last_ts else "기록 없음"
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("총 시도", f"{total_attempts}회")
+        c2.metric("평균 타율", f"{overall_avg:.1f}%")
+        c3.metric("O / X", f"{total_O} / {total_attempts - total_O}")
+        c4.metric("마지막 활동", last_activity)
+
+        st.markdown("---")
+
+        tab_ch, tab_img, tab_weak, tab_att = st.tabs(
+            ["📊 챕터별 집계", "🖼️ 이미지별 상세", "🎯 약점 TOP 10", "📅 출석 현황"]
+        )
+
+        # ── 탭 1: 챕터별 집계 ──
+        with tab_ch:
+            if not t_chapters:
+                st.info("챕터가 없습니다.")
+            else:
+                ch_rows = []
+                for ch_path, ch_name in t_chapters:
+                    imgs = get_images(t_folder, t_student, ch_path)
+                    img_names = [os.path.basename(p) for p in imgs]
+                    ch_df = s_df[s_df['Image'].isin(img_names)] if not s_df.empty else pd.DataFrame()
+                    total = len(ch_df)
+                    o_cnt = int((ch_df['Result'] == 'O').sum()) if total else 0
+                    avg = (o_cnt / total * 100) if total else 0.0
+
+                    # 약점 이미지 개수 (5회 이상 + 타율 60% 이하)
+                    weak_cnt = 0
+                    for p in imgs:
+                        a, recs = calculate_batting_average(db_df_t, t_student, p)
+                        if len(recs) >= 5 and a <= 0.6:
+                            weak_cnt += 1
+
+                    ch_rows.append({
+                        "챕터": ch_name,
+                        "이미지 수": len(imgs),
+                        "총 시도": total,
+                        "평균 타율": f"{avg:.1f}%" if total else "-",
+                        "약점(≤60%)": weak_cnt
+                    })
+                st.dataframe(pd.DataFrame(ch_rows), use_container_width=True, hide_index=True)
+
+        # ── 탭 2: 이미지별 상세 ──
+        with tab_img:
+            if not t_chapters:
+                st.info("챕터가 없습니다.")
+            else:
+                ch_pick = st.selectbox(
+                    "챕터 선택",
+                    t_chapters,
+                    format_func=lambda x: x[1],
+                    key="teacher_ch_pick"
+                )
+                if ch_pick:
+                    imgs = get_images(t_folder, t_student, ch_pick[0])
+                    if not imgs:
+                        st.info("이미지가 없습니다.")
+                    else:
+                        rows = []
+                        for p in imgs:
+                            name = os.path.basename(p)
+                            total_img = len(s_df[s_df['Image'] == name]) if not s_df.empty else 0
+                            avg, recs = calculate_batting_average(db_df_t, t_student, p)
+                            rows.append({
+                                "파일명": name,
+                                "총 시도": total_img,
+                                "최근 5회 타율": f"{avg*100:.0f}%" if recs else "-",
+                                "최근 기록": " ".join(recs) if recs else "-"
+                            })
+                        rows.sort(key=lambda r: (r["총 시도"] == 0, r["최근 5회 타율"]))
+                        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        # ── 탭 3: 약점 TOP 10 ──
+        with tab_weak:
+            weak = []
+            for ch_path, ch_name in t_chapters:
+                for p in get_images(t_folder, t_student, ch_path):
+                    avg, recs = calculate_batting_average(db_df_t, t_student, p)
+                    if len(recs) >= 5:
+                        weak.append({
+                            "챕터": ch_name,
+                            "파일명": os.path.basename(p),
+                            "_avg": avg,
+                            "타율": f"{avg*100:.0f}%",
+                            "최근 기록": " ".join(recs)
+                        })
+            weak.sort(key=lambda x: x["_avg"])
+            top10 = weak[:10]
+            if top10:
+                df_w = pd.DataFrame(top10).drop(columns=["_avg"])
+                st.dataframe(df_w, use_container_width=True, hide_index=True)
+                st.caption("※ 5회 이상 출제된 이미지만 포함 (타율 신뢰도 확보)")
+            else:
+                st.info("5회 이상 출제된 이미지가 없어 약점 분석이 불가능합니다. 데이터가 더 쌓이면 자동으로 표시됩니다.")
+
+        # ── 탭 4: 출석 현황 ──
+        with tab_att:
+            today = get_kst_now()
+            cc1, cc2 = st.columns([1, 1])
+            with cc1:
+                t_year = st.selectbox("연도", [today.year, today.year - 1], index=0)
+            with cc2:
+                t_month = st.selectbox("월", list(range(1, 13)), index=today.month - 1)
+
+            attended = get_attendance(client, t_student, t_year, t_month)
+            st.markdown(f"#### {t_year}년 {t_month}월 · 출석 {len(attended)}일")
+
+            calendar.setfirstweekday(calendar.SUNDAY)
+            cal_matrix = calendar.monthcalendar(t_year, t_month)
+            header = ['일', '월', '화', '수', '목', '금', '토']
+            h_cols = st.columns(7)
+            for i, h in enumerate(header):
+                color = "#E74C3C" if i == 0 else "#3498DB" if i == 6 else "#888"
+                h_cols[i].markdown(
+                    f"<div style='text-align:center;color:{color};font-weight:600;font-size:13px;padding:6px 0;'>{h}</div>",
+                    unsafe_allow_html=True
+                )
+            for week in cal_matrix:
+                w_cols = st.columns(7)
+                for i, day in enumerate(week):
+                    if day == 0:
+                        w_cols[i].markdown("&nbsp;", unsafe_allow_html=True)
+                    elif day in attended:
+                        is_today = (day == today.day and t_month == today.month and t_year == today.year)
+                        bg = "#E74C3C" if is_today else "#4CAF50"
+                        w_cols[i].markdown(
+                            f"<div style='text-align:center;background:{bg};color:white;"
+                            f"border-radius:6px;padding:10px 0;font-weight:700;'>{day}</div>",
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        w_cols[i].markdown(
+                            f"<div style='text-align:center;padding:10px 0;color:#999;'>{day}</div>",
+                            unsafe_allow_html=True
+                        )
+
+    st.markdown('<div class="footer-text">© Teacher Dashboard · Syntax Pitching™</div>', unsafe_allow_html=True)
+    st.stop()
 
 if all_students_info:
     if url_student:
