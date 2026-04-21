@@ -481,19 +481,49 @@ if all_students_info:
         chapter_list = get_chapters(folder_name, student_name)
         if chapter_list:
             selected_chapters = st.sidebar.multiselect("챕터 선택 (복수 선택 가능)", chapter_list, format_func=lambda x: x[1])
-            
+
+            # 타율 필터 드롭다운 (기본값: 전체 출제 = 필터 없음)
+            batting_filter_options = {
+                "전체 출제": None,
+                "80% 이하": 0.8,
+                "60% 이하": 0.6,
+                "40% 이하": 0.4,
+                "20% 이하": 0.2,
+            }
+            batting_filter_label = st.sidebar.selectbox(
+                "타율 필터",
+                list(batting_filter_options.keys()),
+                index=0,
+                help="선택한 타율 이하의 이미지만 출제됩니다. 타율은 최근 5회 기준이며, 5회 미만 출제된 이미지는 제외됩니다."
+            )
+
             if st.sidebar.button("훈련 시작 (Start)", use_container_width=True) and selected_chapters:
                 all_images = []
                 for ch_path, ch_name in selected_chapters:
                     all_images.extend(get_images(folder_name, student_name, ch_path))
-                random.shuffle(all_images)
-                st.session_state.update({
-                    'folder_name': folder_name, 'student_name': student_name, 'selected_chapters': selected_chapters, 
-                    'original_playlist': all_images.copy(), 'playlist': all_images, 'current_index': 0, 'results': [], 
-                    'is_practice_mode': False, 'mode': 'playing', 'is_daily': False
-                })
-                if client: st.session_state['db_data'] = get_data_from_sheet(client)
-                st.rerun()
+
+                # 타율 필터 적용
+                db_df = get_data_from_sheet(client) if client else pd.DataFrame()
+                threshold = batting_filter_options[batting_filter_label]
+                if threshold is not None:
+                    filtered = []
+                    for img in all_images:
+                        avg, records = calculate_batting_average(db_df, student_name, img)
+                        if len(records) >= 5 and avg <= threshold:
+                            filtered.append(img)
+                    all_images = filtered
+
+                if not all_images:
+                    st.sidebar.warning("조건에 맞는 이미지가 없습니다.")
+                else:
+                    random.shuffle(all_images)
+                    st.session_state.update({
+                        'folder_name': folder_name, 'student_name': student_name, 'selected_chapters': selected_chapters,
+                        'original_playlist': all_images.copy(), 'playlist': all_images, 'current_index': 0, 'results': [],
+                        'is_practice_mode': False, 'mode': 'playing', 'is_daily': False
+                    })
+                    st.session_state['db_data'] = db_df
+                    st.rerun()
 
             if st.sidebar.button("피칭 기록 보기", use_container_width=True) and selected_chapters:
                 st.session_state.update({'folder_name': folder_name, 'student_name': student_name, 'selected_chapters': selected_chapters, 'mode': 'records'})
