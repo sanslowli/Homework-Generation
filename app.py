@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import os
 import random
 import gspread
@@ -138,32 +139,49 @@ def save_answer(client, student, image, answer):
     except Exception:
         return False
 
-def answer_reveal_html(answer_text, button_label="🔒 정답 보기 (꾹 누르기)"):
-    """press-and-hold 로 정답이 표시되는 HTML 조각 반환."""
+def render_answer_reveal(answer_text, button_label="🔒 정답 보기 (꾹 누르기)"):
+    """press-and-hold 정답 reveal 위젯 렌더링.
+    Streamlit은 st.markdown 의 인라인 JS 핸들러를 제거하므로
+    components.v1.html (iframe) 로 실제 JS 이벤트가 동작하게 한다."""
+
+    # ── 정답이 없는 경우: 짧은 플레이스홀더 ──
     if not answer_text:
-        return (
-            '<div style="margin-top:8px;color:#bbb;font-size:13px;'
-            'padding:6px 10px;border:1px dashed #ddd;border-radius:6px;">'
-            '정답 미등록 — 설정에서 입력 가능</div>'
-        )
-    # HTML 이스케이프
+        placeholder_html = """
+        <div style="margin:0;color:#bbb;font-size:13px;padding:10px 12px;
+                    border:1px dashed #ddd;border-radius:6px;
+                    font-family:-apple-system,system-ui,'Noto Sans KR',sans-serif;">
+          정답 미등록 — '📝 정답 입력' 메뉴에서 등록 가능
+        </div>
+        """
+        components.html(placeholder_html, height=48, scrolling=False)
+        return
+
+    # ── HTML 이스케이프 + 개행 → <br> ──
+    raw = str(answer_text)
     safe = (
-        str(answer_text)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#39;")
+        raw.replace("&", "&amp;")
+           .replace("<", "&lt;")
+           .replace(">", "&gt;")
+           .replace('"', "&quot;")
+           .replace("'", "&#39;")
+           .replace("\n", "<br>")
     )
+
+    # ── 표시 줄 수 추정 (iframe 높이 동적 계산) ──
+    # 입력된 개행 + 한 줄이 길면 자동 줄바꿈도 반영 (좁은 모바일 기준 ~35자/줄)
+    est_lines = 0
+    for ln in raw.split("\n"):
+        est_lines += max(1, (len(ln) + 34) // 35)
+    est_lines = max(1, min(est_lines, 10))  # 상한 10줄
+
+    # 버튼(45) + margin(10) + answer 박스 padding 30 + line 28px * n + 버퍼 12
+    total_h = 45 + 10 + 30 + est_lines * 28 + 12
+
     uid = base64.b64encode(os.urandom(6)).decode().replace("/", "_").replace("+", "-").rstrip("=")
-    return f"""
-    <div style="margin-top:10px;">
+
+    html = f"""
+    <div style="margin:0;font-family:-apple-system,system-ui,'Noto Sans KR',sans-serif;">
       <button id="btn_{uid}"
-        onmousedown="document.getElementById('ans_{uid}').style.opacity='1';"
-        onmouseup="document.getElementById('ans_{uid}').style.opacity='0';"
-        onmouseleave="document.getElementById('ans_{uid}').style.opacity='0';"
-        ontouchstart="event.preventDefault();document.getElementById('ans_{uid}').style.opacity='1';"
-        ontouchend="document.getElementById('ans_{uid}').style.opacity='0';"
         style="background:#34495E;color:white;border:none;border-radius:8px;
                padding:10px 16px;font-size:15px;font-weight:600;cursor:pointer;
                width:100%;user-select:none;-webkit-user-select:none;touch-action:none;">
@@ -172,11 +190,29 @@ def answer_reveal_html(answer_text, button_label="🔒 정답 보기 (꾹 누르
       <div id="ans_{uid}"
         style="opacity:0;transition:opacity 0.1s;margin-top:10px;padding:14px;
                background:#FFF8E1;border:1px solid #F0D070;border-radius:8px;
-               font-size:17px;line-height:1.5;color:#333;pointer-events:none;">
+               font-size:17px;line-height:1.6;color:#333;pointer-events:none;
+               word-wrap:break-word;overflow-wrap:break-word;">
         {safe}
       </div>
+      <script>
+        (function(){{
+          var btn = document.getElementById('btn_{uid}');
+          var ans = document.getElementById('ans_{uid}');
+          var show = function(){{ ans.style.opacity = '1'; }};
+          var hide = function(){{ ans.style.opacity = '0'; }};
+          if (btn) {{
+            btn.addEventListener('mousedown', show);
+            btn.addEventListener('mouseup', hide);
+            btn.addEventListener('mouseleave', hide);
+            btn.addEventListener('touchstart', function(e){{ e.preventDefault(); show(); }}, {{passive:false}});
+            btn.addEventListener('touchend', hide);
+            btn.addEventListener('touchcancel', hide);
+          }}
+        }})();
+      </script>
     </div>
     """
+    components.html(html, height=total_h, scrolling=False)
 
 def get_attendance(client, student_name, year, month):
     df = get_data_from_sheet(client)
@@ -893,7 +929,7 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
         if 'answers_map' not in st.session_state:
             st.session_state['answers_map'] = load_answers_for_student(client, st.session_state['student_name']) if client else {}
         _curr_ans = st.session_state['answers_map'].get(os.path.basename(current_img_path), "")
-        st.markdown(answer_reveal_html(_curr_ans), unsafe_allow_html=True)
+        render_answer_reveal(_curr_ans)
 
         col1, col2 = st.columns(2)
         with col1:
@@ -947,7 +983,7 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                         _mark = "🟢 O" if _r['result'] == 'O' else "🔴 X"
                         st.markdown(f"**{_mark}** · `{_fname}`")
                         display_responsive_image(_r['file'], is_grid=True)
-                        st.markdown(answer_reveal_html(_ans_map.get(_fname, "")), unsafe_allow_html=True)
+                        render_answer_reveal(_ans_map.get(_fname, ""))
                         st.markdown("&nbsp;", unsafe_allow_html=True)
 
                 st.markdown("---")
@@ -1001,7 +1037,7 @@ elif st.session_state['mode'] == 'daily_result':
                 _dmark = "🟢 O" if _dr['result'] == 'O' else "🔴 X"
                 st.markdown(f"**{_dmark}** · `{_dfname}`")
                 display_responsive_image(_dr['file'], is_grid=True)
-                st.markdown(answer_reveal_html(_ans_map_d.get(_dfname, "")), unsafe_allow_html=True)
+                render_answer_reveal(_ans_map_d.get(_dfname, ""))
                 st.markdown("&nbsp;", unsafe_allow_html=True)
 
     c1, c2 = st.columns(2)
@@ -1037,13 +1073,17 @@ elif st.session_state['mode'] == 'records':
                 st.caption(f"타율: :{color}[{avg*100:.0f}%] | {hist_str}")
                 # 정답 reveal
                 img_name = os.path.basename(img_path)
-                st.markdown(answer_reveal_html(answers_map.get(img_name, "")), unsafe_allow_html=True)
+                render_answer_reveal(answers_map.get(img_name, ""))
 
 elif st.session_state['mode'] == 'answers_edit':
     chapter_names = ", ".join([ch_name for ch_path, ch_name in st.session_state['selected_chapters']])
     st.title(f"📝 정답 입력: {st.session_state['student_name']}")
     st.caption(f"선택 챕터: {chapter_names}")
-    st.info("각 이미지에 해당하는 영어 문장을 입력한 뒤 **저장** 버튼을 누르세요. 나중에 훈련 중·결과 화면에서 '꾹 눌러' 정답을 확인할 수 있어요.")
+    st.info(
+        "이미지 한 장은 **2~4칸**의 그림으로 구성돼 있어요.\n\n"
+        "각 칸의 영어 문장을 **엔터(Enter)로 줄바꿈**해서 이어 적어주세요.\n\n"
+        "훈련 중·결과 화면에서 버튼을 '꾹 눌러' 정답을 확인할 수 있어요."
+    )
 
     if st.button("⬅️ 뒤로가기"):
         st.session_state['mode'] = 'setup'
@@ -1071,19 +1111,28 @@ elif st.session_state['mode'] == 'answers_edit':
                 with c_input:
                     existing = answers_map.get(img_name, "")
                     input_key = f"ans_input_{ch_name}_{img_name}"
-                    new_val = st.text_input(
+                    # 기존 값의 줄 수에 따라 동적 높이 (최소 2줄 ~ 최대 6줄)
+                    _lines = max(2, min(6, existing.count("\n") + 2)) if existing else 3
+                    new_val = st.text_area(
                         label=img_name,
                         value=existing,
                         key=input_key,
-                        placeholder="예: Hapjeong has this artsy vibe.",
+                        placeholder=(
+                            "예) 2칸 그림이라면:\n"
+                            "Hapjeong has this artsy vibe.\n"
+                            "So I always hang out there."
+                        ),
+                        height=_lines * 28 + 20,
                         label_visibility="collapsed",
+                        help="칸마다 Enter로 줄바꿈해서 2~4문장 다 적어도 돼요.",
                     )
                     btn_col1, btn_col2 = st.columns([1, 3])
                     with btn_col1:
                         save_clicked = st.button("💾 저장", key=f"save_{input_key}", use_container_width=True)
                     with btn_col2:
                         if existing:
-                            st.caption(f"✅ 현재 저장된 정답 있음")
+                            _lc = existing.count("\n") + 1
+                            st.caption(f"✅ 저장됨 ({_lc}줄)")
                         else:
                             st.caption("⚪ 미입력")
                     if save_clicked:
