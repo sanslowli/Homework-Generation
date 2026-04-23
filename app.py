@@ -72,9 +72,111 @@ def save_to_sheet(client, student, chapter, image, result):
             sheet.append_row(["Timestamp", "Student", "Chapter", "Image", "Result"])
         timestamp = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
         sheet.append_row([timestamp, student, chapter, image, result])
-        st.cache_data.clear() 
+        st.cache_data.clear()
     except Exception as e:
         pass
+
+# ==========================================
+# [정답 시트] Answers 워크시트 - 자동 생성/조회/저장
+# ==========================================
+def get_or_create_answers_sheet(client):
+    """Answers 워크시트 반환. 없으면 생성 + 헤더 세팅."""
+    try:
+        spreadsheet = client.open(SHEET_NAME)
+        try:
+            ws = spreadsheet.worksheet("Answers")
+        except gspread.exceptions.WorksheetNotFound:
+            ws = spreadsheet.add_worksheet(title="Answers", rows=1000, cols=4)
+            ws.append_row(["Student", "Image", "Answer", "Updated"])
+        # 빈 시트 방어
+        if not ws.get_all_values():
+            ws.append_row(["Student", "Image", "Answer", "Updated"])
+        return ws
+    except Exception as e:
+        return None
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_answers_for_student(_client, student):
+    """{image_filename: answer_text} 반환. 60초 캐시."""
+    if _client is None:
+        return {}
+    try:
+        ws = get_or_create_answers_sheet(_client)
+        if ws is None:
+            return {}
+        rows = ws.get_all_records()
+        return {
+            r["Image"]: r["Answer"]
+            for r in rows
+            if r.get("Student") == student and r.get("Image") and r.get("Answer")
+        }
+    except Exception:
+        return {}
+
+def save_answer(client, student, image, answer):
+    """학생-이미지 키로 upsert. 같은 (Student, Image) 행이 있으면 업데이트, 없으면 append."""
+    if client is None:
+        return False
+    try:
+        ws = get_or_create_answers_sheet(client)
+        if ws is None:
+            return False
+        rows = ws.get_all_values()
+        timestamp = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
+        found_row = None
+        for i, r in enumerate(rows[1:], start=2):  # 1행은 헤더
+            if len(r) >= 2 and r[0] == student and r[1] == image:
+                found_row = i
+                break
+        if found_row:
+            ws.update(f"C{found_row}:D{found_row}", [[answer, timestamp]])
+        else:
+            ws.append_row([student, image, answer, timestamp])
+        # 캐시 무효화
+        load_answers_for_student.clear()
+        return True
+    except Exception:
+        return False
+
+def answer_reveal_html(answer_text, button_label="🔒 정답 보기 (꾹 누르기)"):
+    """press-and-hold 로 정답이 표시되는 HTML 조각 반환."""
+    if not answer_text:
+        return (
+            '<div style="margin-top:8px;color:#bbb;font-size:13px;'
+            'padding:6px 10px;border:1px dashed #ddd;border-radius:6px;">'
+            '정답 미등록 — 설정에서 입력 가능</div>'
+        )
+    # HTML 이스케이프
+    safe = (
+        str(answer_text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+    uid = base64.b64encode(os.urandom(6)).decode().replace("/", "_").replace("+", "-").rstrip("=")
+    return f"""
+    <div style="margin-top:10px;">
+      <button id="btn_{uid}"
+        onmousedown="document.getElementById('ans_{uid}').style.opacity='1';"
+        onmouseup="document.getElementById('ans_{uid}').style.opacity='0';"
+        onmouseleave="document.getElementById('ans_{uid}').style.opacity='0';"
+        ontouchstart="event.preventDefault();document.getElementById('ans_{uid}').style.opacity='1';"
+        ontouchend="document.getElementById('ans_{uid}').style.opacity='0';"
+        style="background:#34495E;color:white;border:none;border-radius:8px;
+               padding:10px 16px;font-size:15px;font-weight:600;cursor:pointer;
+               width:100%;user-select:none;-webkit-user-select:none;touch-action:none;">
+        {button_label}
+      </button>
+      <div id="ans_{uid}"
+        style="opacity:0;transition:opacity 0.1s;margin-top:10px;padding:14px;
+               background:#FFF8E1;border:1px solid #F0D070;border-radius:8px;
+               font-size:17px;line-height:1.5;color:#333;pointer-events:none;">
+        {safe}
+      </div>
+    </div>
+    """
 
 def get_attendance(client, student_name, year, month):
     df = get_data_from_sheet(client)
@@ -703,11 +805,22 @@ if all_students_info:
                         'is_practice_mode': False, 'mode': 'playing', 'is_daily': False
                     })
                     st.session_state['db_data'] = db_df
+                    # 정답 맵 새로고침 (훈련 세션 시작 시 항상 최신 데이터로)
+                    st.session_state.pop('answers_map', None)
                     st.rerun()
 
             if st.sidebar.button("피칭 기록 보기", use_container_width=True) and selected_chapters:
                 st.session_state.update({'folder_name': folder_name, 'student_name': student_name, 'selected_chapters': selected_chapters, 'mode': 'records'})
                 if client: st.session_state['db_data'] = get_data_from_sheet(client)
+                st.rerun()
+
+            if st.sidebar.button("📝 정답 입력", use_container_width=True) and selected_chapters:
+                st.session_state.update({
+                    'folder_name': folder_name,
+                    'student_name': student_name,
+                    'selected_chapters': selected_chapters,
+                    'mode': 'answers_edit',
+                })
                 st.rerun()
 
 # ==========================================
@@ -742,11 +855,13 @@ if st.session_state['mode'] == 'setup':
             
             if daily_playlist:
                 st.session_state.update({
-                    'folder_name': folder_name, 'student_name': student_name, 
-                    'original_playlist': daily_playlist.copy(), 'playlist': daily_playlist, 
-                    'current_index': 0, 'results': [], 'is_practice_mode': False, 
+                    'folder_name': folder_name, 'student_name': student_name,
+                    'original_playlist': daily_playlist.copy(), 'playlist': daily_playlist,
+                    'current_index': 0, 'results': [], 'is_practice_mode': False,
                     'mode': 'daily_playing', 'is_daily': True
                 })
+                # 정답 맵 새로고침
+                st.session_state.pop('answers_map', None)
                 st.rerun()
             else:
                 st.warning("출제할 이미지가 없습니다. 폴더 구성을 확인해 주세요.")
@@ -773,6 +888,12 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
         current_img_path = playlist[idx]
         current_chapter = os.path.basename(os.path.dirname(current_img_path))
         display_responsive_image(current_img_path, is_grid=False)
+
+        # 정답 press-and-hold reveal (연습/훈련/Daily 공통)
+        if 'answers_map' not in st.session_state:
+            st.session_state['answers_map'] = load_answers_for_student(client, st.session_state['student_name']) if client else {}
+        _curr_ans = st.session_state['answers_map'].get(os.path.basename(current_img_path), "")
+        st.markdown(answer_reveal_html(_curr_ans), unsafe_allow_html=True)
 
         col1, col2 = st.columns(2)
         with col1:
@@ -815,6 +936,20 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                 results = st.session_state['results']
                 failed_items = [r['file'] for r in results if r['result'] == 'X']
                 st.markdown(f"### 결과: {len([r for r in results if r['result'] == 'O'])} / {len(results)}")
+
+                # 결과 목록: 이미지 + O/X + 정답 reveal
+                _ans_map = st.session_state.get('answers_map') or (load_answers_for_student(client, st.session_state['student_name']) if client else {})
+                st.markdown("#### 📋 라운드 복기")
+                r_cols = st.columns(2)
+                for _ri, _r in enumerate(results):
+                    with r_cols[_ri % 2]:
+                        _fname = os.path.basename(_r['file'])
+                        _mark = "🟢 O" if _r['result'] == 'O' else "🔴 X"
+                        st.markdown(f"**{_mark}** · `{_fname}`")
+                        display_responsive_image(_r['file'], is_grid=True)
+                        st.markdown(answer_reveal_html(_ans_map.get(_fname, "")), unsafe_allow_html=True)
+                        st.markdown("&nbsp;", unsafe_allow_html=True)
+
                 st.markdown("---")
                 c1, c2, c3 = st.columns(3)
                 with c1:
@@ -855,6 +990,20 @@ elif st.session_state['mode'] == 'daily_result':
     b64_img = st.session_state['daily_summary_img']
     st.markdown(f'<img src="data:image/jpeg;base64,{b64_img}" style="width:100%; max-width:800px; border-radius:8px;">', unsafe_allow_html=True)
 
+    # 정답 복기 (press-and-hold)
+    st.markdown("---")
+    with st.expander("📋 오늘의 라운드 복기 · 정답 보기", expanded=False):
+        _ans_map_d = st.session_state.get('answers_map') or (load_answers_for_student(client, st.session_state['student_name']) if client else {})
+        d_cols = st.columns(2)
+        for _di, _dr in enumerate(results):
+            with d_cols[_di % 2]:
+                _dfname = os.path.basename(_dr['file'])
+                _dmark = "🟢 O" if _dr['result'] == 'O' else "🔴 X"
+                st.markdown(f"**{_dmark}** · `{_dfname}`")
+                display_responsive_image(_dr['file'], is_grid=True)
+                st.markdown(answer_reveal_html(_ans_map_d.get(_dfname, "")), unsafe_allow_html=True)
+                st.markdown("&nbsp;", unsafe_allow_html=True)
+
     c1, c2 = st.columns(2)
     with c1:
         if failed_items and st.button("틀린 구간 반복", use_container_width=True):
@@ -869,11 +1018,14 @@ elif st.session_state['mode'] == 'records':
     chapter_names = ", ".join([ch_name for ch_path, ch_name in st.session_state['selected_chapters']])
     st.title(f"피칭 기록: {st.session_state['student_name']} - {chapter_names}")
     if st.button("뒤로가기"): st.session_state['mode'] = 'setup'; st.rerun()
-    
+
     all_imgs = []
     for ch_path, ch_name in st.session_state['selected_chapters']:
         all_imgs.extend(get_images(st.session_state['folder_name'], st.session_state['student_name'], ch_path))
-        
+
+    # 학생 정답 로드 (press-and-hold 용)
+    answers_map = load_answers_for_student(client, st.session_state['student_name']) if client else {}
+
     if all_imgs and 'db_data' in st.session_state:
         cols = st.columns(3)
         for i, img_path in enumerate(all_imgs):
@@ -883,3 +1035,74 @@ elif st.session_state['mode'] == 'records':
                 color = "green" if avg >= 0.8 else "orange" if avg >= 0.5 else "red"
                 hist_str = " ".join([f"{h}" for h in history])
                 st.caption(f"타율: :{color}[{avg*100:.0f}%] | {hist_str}")
+                # 정답 reveal
+                img_name = os.path.basename(img_path)
+                st.markdown(answer_reveal_html(answers_map.get(img_name, "")), unsafe_allow_html=True)
+
+elif st.session_state['mode'] == 'answers_edit':
+    chapter_names = ", ".join([ch_name for ch_path, ch_name in st.session_state['selected_chapters']])
+    st.title(f"📝 정답 입력: {st.session_state['student_name']}")
+    st.caption(f"선택 챕터: {chapter_names}")
+    st.info("각 이미지에 해당하는 영어 문장을 입력한 뒤 **저장** 버튼을 누르세요. 나중에 훈련 중·결과 화면에서 '꾹 눌러' 정답을 확인할 수 있어요.")
+
+    if st.button("⬅️ 뒤로가기"):
+        st.session_state['mode'] = 'setup'
+        st.rerun()
+
+    if not client:
+        st.error("구글 시트 연결 실패 — 정답을 저장할 수 없습니다.")
+    else:
+        # 기존 정답 로드
+        answers_map = load_answers_for_student(client, st.session_state['student_name'])
+
+        # 챕터별 반복
+        for ch_path, ch_name in st.session_state['selected_chapters']:
+            st.markdown(f"### 📘 {ch_name}")
+            imgs = get_images(st.session_state['folder_name'], st.session_state['student_name'], ch_path)
+            if not imgs:
+                st.caption("이미지 없음")
+                continue
+
+            for img_path in imgs:
+                img_name = os.path.basename(img_path)
+                c_img, c_input = st.columns([1, 2])
+                with c_img:
+                    display_responsive_image(img_path, is_grid=True)
+                with c_input:
+                    existing = answers_map.get(img_name, "")
+                    input_key = f"ans_input_{ch_name}_{img_name}"
+                    new_val = st.text_input(
+                        label=img_name,
+                        value=existing,
+                        key=input_key,
+                        placeholder="예: Hapjeong has this artsy vibe.",
+                        label_visibility="collapsed",
+                    )
+                    btn_col1, btn_col2 = st.columns([1, 3])
+                    with btn_col1:
+                        save_clicked = st.button("💾 저장", key=f"save_{input_key}", use_container_width=True)
+                    with btn_col2:
+                        if existing:
+                            st.caption(f"✅ 현재 저장된 정답 있음")
+                        else:
+                            st.caption("⚪ 미입력")
+                    if save_clicked:
+                        trimmed = new_val.strip()
+                        if trimmed == existing:
+                            st.toast("변경 사항이 없습니다.")
+                        elif trimmed == "" and existing:
+                            # 빈 값 저장 → 삭제 개념
+                            ok = save_answer(client, st.session_state['student_name'], img_name, "")
+                            if ok:
+                                st.toast(f"🗑️ '{img_name}' 정답 지움")
+                                st.rerun()
+                            else:
+                                st.toast("⚠️ 저장 실패 — 잠시 후 다시 시도해 주세요.")
+                        else:
+                            ok = save_answer(client, st.session_state['student_name'], img_name, trimmed)
+                            if ok:
+                                st.toast(f"✅ '{img_name}' 저장 완료")
+                                st.rerun()
+                            else:
+                                st.toast("⚠️ 저장 실패 — 잠시 후 다시 시도해 주세요.")
+            st.markdown("---")
