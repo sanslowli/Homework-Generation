@@ -910,7 +910,7 @@ if st.session_state['mode'] == 'setup':
 
     # 사용법 버튼 (처음 방문자를 위한 가이드)
     st.write("")
-    if st.button("📖 Syntax Pitching™ 사용법"):
+    if st.button("About Syntax Pitching™"):
         st.session_state['mode'] = 'help'
         st.rerun()
 
