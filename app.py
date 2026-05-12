@@ -858,6 +858,7 @@ if all_students_info:
                     'mode': 'answers_edit',
                 })
                 st.rerun()
+            st.sidebar.caption("* 챕터를 선택해야 진입 가능")
 
 # ==========================================
 # [화면] 메인 로직
@@ -909,8 +910,7 @@ if st.session_state['mode'] == 'setup':
 
     # 사용법 버튼 (처음 방문자를 위한 가이드)
     st.write("")
-    st.markdown("---")
-    if st.button("📖 Syntax Pitching™ 사용법", use_container_width=True):
+    if st.button("📖 Syntax Pitching™ 사용법"):
         st.session_state['mode'] = 'help'
         st.rerun()
 
