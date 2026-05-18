@@ -80,25 +80,49 @@ def save_to_sheet(client, student, chapter, image, result):
 # ==========================================
 # [정답 시트] Answers 워크시트 - 자동 생성/조회/저장
 # ==========================================
+ANSWERS_HEADER = ["Student", "Chapter", "Image", "Answer", "Updated"]
+LEGACY_BACKFILL_CHAPTER = "602"  # 마이그레이션 당시 모든 데이터가 602였음
+
 def get_or_create_answers_sheet(client):
-    """Answers 워크시트 반환. 없으면 생성 + 헤더 세팅."""
+    """Answers 워크시트 반환. 없으면 생성, 옛 4-col 포맷이면 Chapter 컬럼 자동 백필."""
     try:
         spreadsheet = client.open(SHEET_NAME)
         try:
             ws = spreadsheet.worksheet("Answers")
         except gspread.exceptions.WorksheetNotFound:
-            ws = spreadsheet.add_worksheet(title="Answers", rows=1000, cols=4)
-            ws.append_row(["Student", "Image", "Answer", "Updated"])
+            ws = spreadsheet.add_worksheet(title="Answers", rows=1000, cols=5)
+            ws.append_row(ANSWERS_HEADER)
+            return ws
+
         # 빈 시트 방어
-        if not ws.get_all_values():
-            ws.append_row(["Student", "Image", "Answer", "Updated"])
+        header = ws.row_values(1)
+        if not header:
+            ws.append_row(ANSWERS_HEADER)
+            return ws
+
+        # 헤더에 Chapter가 없으면 → 옛 [Student, Image, Answer, Updated] 포맷
+        # 모든 행에 Chapter='602' 삽입해서 5-col 포맷으로 변환
+        if "Chapter" not in header:
+            all_vals = ws.get_all_values()
+            new_rows = [ANSWERS_HEADER]
+            for row in all_vals[1:]:
+                padded = list(row) + [""] * (4 - len(row))
+                new_rows.append([
+                    padded[0],                          # Student
+                    LEGACY_BACKFILL_CHAPTER,            # Chapter (백필)
+                    padded[1],                          # Image
+                    padded[2],                          # Answer
+                    padded[3],                          # Updated
+                ])
+            ws.clear()
+            ws.update("A1", new_rows)
         return ws
     except Exception as e:
         return None
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_answers_for_student(_client, student):
-    """{image_filename: answer_text} 반환. 60초 캐시."""
+    """{(chapter, image_filename): answer_text} 반환. 60초 캐시."""
     if _client is None:
         return {}
     try:
@@ -107,15 +131,15 @@ def load_answers_for_student(_client, student):
             return {}
         rows = ws.get_all_records()
         return {
-            r["Image"]: r["Answer"]
+            (str(r.get("Chapter", "")), r["Image"]): r["Answer"]
             for r in rows
             if r.get("Student") == student and r.get("Image") and r.get("Answer")
         }
     except Exception:
         return {}
 
-def save_answer(client, student, image, answer):
-    """학생-이미지 키로 upsert. 같은 (Student, Image) 행이 있으면 업데이트, 없으면 append."""
+def save_answer(client, student, chapter, image, answer):
+    """학생-챕터-이미지 키로 upsert. 같은 (Student, Chapter, Image) 행이 있으면 업데이트, 없으면 append."""
     if client is None:
         return False
     try:
@@ -126,13 +150,15 @@ def save_answer(client, student, image, answer):
         timestamp = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
         found_row = None
         for i, r in enumerate(rows[1:], start=2):  # 1행은 헤더
-            if len(r) >= 2 and r[0] == student and r[1] == image:
+            # 5-col 포맷: [Student, Chapter, Image, Answer, Updated]
+            if len(r) >= 3 and r[0] == student and r[1] == str(chapter) and r[2] == image:
                 found_row = i
                 break
         if found_row:
-            ws.update(f"C{found_row}:D{found_row}", [[answer, timestamp]])
+            # Answer(D) + Updated(E) 열만 업데이트
+            ws.update(f"D{found_row}:E{found_row}", [[answer, timestamp]])
         else:
-            ws.append_row([student, image, answer, timestamp])
+            ws.append_row([student, str(chapter), image, answer, timestamp])
         # 캐시 무효화
         load_answers_for_student.clear()
         return True
@@ -957,7 +983,7 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
         # 정답 press-and-hold reveal (미통과/통과 버튼 바로 아래 배치 - 가시성 확보)
         if 'answers_map' not in st.session_state:
             st.session_state['answers_map'] = load_answers_for_student(client, st.session_state['student_name']) if client else {}
-        _curr_ans = st.session_state['answers_map'].get(os.path.basename(current_img_path), "")
+        _curr_ans = st.session_state['answers_map'].get((current_chapter, os.path.basename(current_img_path)), "")
         render_answer_reveal(_curr_ans)
 
         if idx > 0 and not is_practice:
@@ -995,10 +1021,11 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                 for _ri, _r in enumerate(results):
                     with r_cols[_ri % 2]:
                         _fname = os.path.basename(_r['file'])
+                        _chapter = os.path.basename(os.path.dirname(_r['file']))
                         _mark = "🟢 O" if _r['result'] == 'O' else "🔴 X"
                         st.markdown(f"**{_mark}** · `{_fname}`")
                         display_responsive_image(_r['file'], is_grid=True)
-                        render_answer_reveal(_ans_map.get(_fname, ""))
+                        render_answer_reveal(_ans_map.get((_chapter, _fname), ""))
                         st.markdown("&nbsp;", unsafe_allow_html=True)
 
                 st.markdown("---")
@@ -1049,10 +1076,11 @@ elif st.session_state['mode'] == 'daily_result':
         for _di, _dr in enumerate(results):
             with d_cols[_di % 2]:
                 _dfname = os.path.basename(_dr['file'])
+                _dchapter = os.path.basename(os.path.dirname(_dr['file']))
                 _dmark = "🟢 O" if _dr['result'] == 'O' else "🔴 X"
                 st.markdown(f"**{_dmark}** · `{_dfname}`")
                 display_responsive_image(_dr['file'], is_grid=True)
-                render_answer_reveal(_ans_map_d.get(_dfname, ""))
+                render_answer_reveal(_ans_map_d.get((_dchapter, _dfname), ""))
                 st.markdown("&nbsp;", unsafe_allow_html=True)
 
     c1, c2 = st.columns(2)
@@ -1088,7 +1116,8 @@ elif st.session_state['mode'] == 'records':
                 st.caption(f"타율: :{color}[{avg*100:.0f}%] | {hist_str}")
                 # 정답 reveal
                 img_name = os.path.basename(img_path)
-                render_answer_reveal(answers_map.get(img_name, ""))
+                ch_name_rec = os.path.basename(os.path.dirname(img_path))
+                render_answer_reveal(answers_map.get((ch_name_rec, img_name), ""))
 
 elif st.session_state['mode'] == 'answers_edit':
     chapter_names = ", ".join([ch_name for ch_path, ch_name in st.session_state['selected_chapters']])
@@ -1124,7 +1153,7 @@ elif st.session_state['mode'] == 'answers_edit':
                 with c_img:
                     display_responsive_image(img_path, is_grid=True)
                 with c_input:
-                    existing = answers_map.get(img_name, "")
+                    existing = answers_map.get((ch_name, img_name), "")
                     input_key = f"ans_input_{ch_name}_{img_name}"
                     # 기존 값의 줄 수에 따라 동적 높이 (최소 2줄 ~ 최대 6줄)
                     _lines = max(2, min(6, existing.count("\n") + 2)) if existing else 3
@@ -1156,16 +1185,16 @@ elif st.session_state['mode'] == 'answers_edit':
                             st.toast("변경 사항이 없습니다.")
                         elif trimmed == "" and existing:
                             # 빈 값 저장 → 삭제 개념
-                            ok = save_answer(client, st.session_state['student_name'], img_name, "")
+                            ok = save_answer(client, st.session_state['student_name'], ch_name, img_name, "")
                             if ok:
-                                st.toast(f"🗑️ '{img_name}' 정답 지움")
+                                st.toast(f"🗑️ '{ch_name}/{img_name}' 정답 지움")
                                 st.rerun()
                             else:
                                 st.toast("⚠️ 저장 실패 — 잠시 후 다시 시도해 주세요.")
                         else:
-                            ok = save_answer(client, st.session_state['student_name'], img_name, trimmed)
+                            ok = save_answer(client, st.session_state['student_name'], ch_name, img_name, trimmed)
                             if ok:
-                                st.toast(f"✅ '{img_name}' 저장 완료")
+                                st.toast(f"✅ '{ch_name}/{img_name}' 저장 완료")
                                 st.rerun()
                             else:
                                 st.toast("⚠️ 저장 실패 — 잠시 후 다시 시도해 주세요.")
