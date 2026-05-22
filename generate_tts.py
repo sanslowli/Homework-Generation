@@ -32,7 +32,6 @@ git push 하면 Streamlit Cloud 가 새 음원과 함께 배포합니다.
 import os
 import sys
 import argparse
-import hashlib
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from pathlib import Path
@@ -93,61 +92,6 @@ def get_audio_path(chapter, section, owner):
     return os.path.join(AUDIO_ROOT, str(chapter), f"{section}_{owner}.mp3")
 
 
-def get_sidecar_path(audio_path):
-    """audio/.../foo.mp3 → audio/.../foo.mp3.sha256 (내용 해시 추적용)"""
-    return audio_path + ".sha256"
-
-
-def content_hash(text):
-    """문장 내용의 SHA-256 해시 (hex 문자열)."""
-    return hashlib.sha256(str(text).encode('utf-8')).hexdigest()
-
-
-def needs_regeneration(audio_path, sentences, force=False):
-    """재생성 필요 여부 + 사유.
-    - force=True              → 무조건 재생성
-    - mp3 없음                → 재생성 (신규)
-    - 사이드카 없음(레거시)   → 재생성 안 함, 단 현재 내용으로 사이드카만 생성
-    - 사이드카와 해시 다름     → 재생성 (내용 변경됨)
-    - 사이드카와 해시 같음     → 스킵
-    """
-    if force:
-        return True, "force flag"
-    if not os.path.exists(audio_path):
-        return True, "mp3 missing"
-    sidecar = get_sidecar_path(audio_path)
-    if not os.path.exists(sidecar):
-        # 레거시 mp3 — 현재 내용을 기준으로 사이드카만 새로 만들고 스킵
-        # (재생성 비용 없이 추적 시스템에 편입)
-        try:
-            Path(os.path.dirname(sidecar)).mkdir(parents=True, exist_ok=True)
-            with open(sidecar, "w") as f:
-                f.write(content_hash(sentences))
-        except Exception:
-            pass
-        return False, "sidecar created (legacy mp3)"
-    try:
-        with open(sidecar, "r") as f:
-            stored = f.read().strip()
-        current = content_hash(sentences)
-        if stored != current:
-            return True, "content changed"
-        return False, "unchanged"
-    except Exception as e:
-        return True, f"sidecar read error: {e}"
-
-
-def write_sidecar(audio_path, sentences):
-    """음성 생성 직후 사이드카 갱신."""
-    sidecar = get_sidecar_path(audio_path)
-    try:
-        Path(os.path.dirname(sidecar)).mkdir(parents=True, exist_ok=True)
-        with open(sidecar, "w") as f:
-            f.write(content_hash(sentences))
-    except Exception:
-        pass
-
-
 def generate_one(openai_client, text, out_path, voice, model, speed):
     """OpenAI TTS 로 mp3 생성 후 out_path 에 저장."""
     Path(os.path.dirname(out_path)).mkdir(parents=True, exist_ok=True)
@@ -192,7 +136,7 @@ def main():
         print(f"   '챕터={args.chapter}' 필터 적용 → {len(rows)} 행")
 
     # 처리 계획
-    plan = []  # (chapter, section, owner, sentences, out_path, action, reason)
+    plan = []  # (chapter, section, owner, sentences, out_path, action)
     for r in rows:
         chapter = str(r.get("Chapter", "")).strip()
         section = str(r.get("Section", "")).strip()
@@ -203,11 +147,10 @@ def main():
         if not sentences.strip():
             continue
         out_path = get_audio_path(chapter, section, owner)
-        regen, reason = needs_regeneration(out_path, sentences, force=args.force)
-        if regen:
-            plan.append((chapter, section, owner, sentences, out_path, "generate", reason))
+        if os.path.exists(out_path) and not args.force:
+            plan.append((chapter, section, owner, sentences, out_path, "skip"))
         else:
-            plan.append((chapter, section, owner, sentences, out_path, "skip", reason))
+            plan.append((chapter, section, owner, sentences, out_path, "generate"))
 
     to_generate = [p for p in plan if p[5] == "generate"]
     to_skip = [p for p in plan if p[5] == "skip"]
@@ -218,9 +161,9 @@ def main():
 
     if to_generate:
         print(f"\n생성 예정 파일:")
-        for ch, sec, owner, _, out_path, _, reason in to_generate:
+        for ch, sec, owner, _, out_path, _ in to_generate:
             rel = os.path.relpath(out_path, BASE_FOLDER)
-            print(f"   • {rel}  (챕터 {ch}, 구간 {sec}, {owner})  [{reason}]")
+            print(f"   • {rel}  (챕터 {ch}, 구간 {sec}, {owner})")
 
     if args.dry_run:
         print("\n--dry-run 모드 — 실제 생성은 하지 않습니다.")
@@ -250,12 +193,11 @@ def main():
     print("\n🎙️ 음성 생성 시작...\n")
     success = 0
     failed = []
-    for i, (ch, sec, owner, sentences, out_path, _, reason) in enumerate(to_generate, 1):
+    for i, (ch, sec, owner, sentences, out_path, _) in enumerate(to_generate, 1):
         rel = os.path.relpath(out_path, BASE_FOLDER)
-        print(f"[{i}/{len(to_generate)}] {rel}  [{reason}] ...", end=" ", flush=True)
+        print(f"[{i}/{len(to_generate)}] {rel} ...", end=" ", flush=True)
         try:
             generate_one(openai_client, sentences, out_path, args.voice, args.model, args.speed)
-            write_sidecar(out_path, sentences)  # 생성 후 해시 사이드카 기록
             print("✅")
             success += 1
         except Exception as e:
