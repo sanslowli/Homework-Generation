@@ -191,7 +191,9 @@ def get_or_create_answer_bank_sheet(client):
             ws.append_row(ANSWER_BANK_HEADER)
         return ws
     except Exception as e:
-        st.error(f"[디버그] get_or_create_answer_bank_sheet 에러: {type(e).__name__}: {e}")
+        # APIError 429(quota) 는 일시적이므로 무시; 그 외만 표시
+        if "429" not in str(e):
+            st.error(f"[디버그] get_or_create_answer_bank_sheet 에러: {type(e).__name__}: {e}")
         return None
 
 def get_or_create_image_matching_sheet(client):
@@ -232,7 +234,8 @@ def load_answer_bank(_client):
                 result[(chapter, section, owner)] = sentences
         return result
     except Exception as e:
-        st.error(f"[디버그] load_answer_bank 에러: {type(e).__name__}: {e}")
+        if "429" not in str(e):
+            st.error(f"[디버그] load_answer_bank 에러: {type(e).__name__}: {e}")
         return {}
 
 def save_answer_bank(client, chapter, section, owner, sentences):
@@ -259,7 +262,8 @@ def save_answer_bank(client, chapter, section, owner, sentences):
         load_answer_bank.clear()
         return True
     except Exception as e:
-        st.error(f"[디버그] save_answer_bank 에러: {type(e).__name__}: {e}")
+        if "429" not in str(e):
+            st.error(f"[디버그] save_answer_bank 에러: {type(e).__name__}: {e}")
         return False
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -540,6 +544,9 @@ def render_match_picker(image_path, image_student, chapter, all_students, image_
     if sel:
         ok = save_image_matching(client, image_student, str(chapter), image_filename, sel)
         if ok:
+            # 세션 캐시 즉시 갱신 (rerun 후 새 매칭이 보이게)
+            st.session_state.setdefault('image_matchings', {})
+            st.session_state['image_matchings'][(image_student, str(chapter), image_filename)] = sel
             st.toast(f"✅ '{sel}' 으로 매칭 저장됨")
             st.rerun()
         else:
@@ -548,9 +555,9 @@ def render_match_picker(image_path, image_student, chapter, all_students, image_
 
 def render_image_answer_widget(image_path, image_student, chapter, all_students, answer_bank, image_matchings, client, key_suffix=""):
     """이미지 아래에 표시되는 위젯.
-    매칭된 경우: 🔊 정답 듣기 (음원 있을 때) + '그림 매칭 수정' 작은 버튼
-    매칭 안된 경우: 표시 안 함 (위쪽 picker 가 처리)
-    음원이 아직 없는 경우: 등록된 텍스트가 있으면 fallback 으로 reveal 버튼 노출."""
+    매칭된 경우 + 음원 있음: 🔊 정답 듣기 버튼
+    매칭된 경우 + 음원 없음: '정답 미입력' 캡션
+    매칭 안된 경우: 표시 안 함 (위쪽 picker 가 처리)"""
     image_filename = os.path.basename(image_path)
     chapter_str = str(chapter)
     key = (image_student, chapter_str, image_filename)
@@ -560,21 +567,21 @@ def render_image_answer_widget(image_path, image_student, chapter, all_students,
         return  # 매칭 안됨 → picker 가 위에서 처리
 
     section = extract_section_from_filename(image_filename)
-    sentences = ""
     audio_abs = None
     if section:
-        sentences = answer_bank.get((chapter_str, section, content_owner), "")
         audio_abs = get_audio_absolute_path(chapter_str, section, content_owner)
     audio_exists = bool(audio_abs and os.path.exists(audio_abs))
 
     if audio_exists:
         render_audio_player(audio_abs)
-    elif sentences:
-        # 음원 준비되기 전까지는 텍스트 reveal 폴백 제공
-        render_answer_reveal(sentences, reveal_label="🔒 정답 보기 (꾹 누르기)", speak_label="🔊 정답 듣기 (브라우저 TTS)")
-        st.caption("※ 고품질 음원 준비 중 — 텍스트로 임시 제공")
     else:
-        st.caption(f"⚪ 정답 미등록 ({content_owner}의 구간 {section}) — 선생님께 등록 요청")
+        st.markdown(
+            '<div style="margin:0;color:#999;font-size:14px;padding:12px 14px;'
+            'border:1px dashed #ddd;border-radius:6px;text-align:center;'
+            'font-family:-apple-system,system-ui,sans-serif;">'
+            '정답 미입력</div>',
+            unsafe_allow_html=True
+        )
 
     # 매칭 수정 UI
     edit_key = f"edit_match_{image_student}_{chapter_str}_{image_filename}_{key_suffix}"
@@ -599,6 +606,9 @@ def render_image_answer_widget(image_path, image_student, chapter, all_students,
             if st.button("적용", key=f"{edit_key}_apply", use_container_width=True):
                 if new_sel and new_sel != content_owner:
                     if save_image_matching(client, image_student, chapter_str, image_filename, new_sel):
+                        # 세션 캐시 즉시 갱신
+                        st.session_state.setdefault('image_matchings', {})
+                        st.session_state['image_matchings'][(image_student, chapter_str, image_filename)] = new_sel
                         st.toast(f"매칭이 '{new_sel}' 으로 수정됨")
                         st.session_state.pop(edit_key, None)
                         st.rerun()
