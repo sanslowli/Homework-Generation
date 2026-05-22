@@ -1,0 +1,100 @@
+name: Generate TTS Audio
+
+# 실행 방법:
+#   1. GitHub 레포 → Actions 탭 → "Generate TTS Audio" 선택
+#   2. 우측 "Run workflow" 버튼 클릭 → "Run workflow" 다시 클릭
+#   3. 잠시 후 새로 생성된 mp3 파일이 자동으로 audio/ 폴더에 커밋됨
+
+on:
+  workflow_dispatch:
+    inputs:
+      chapter:
+        description: '특정 챕터만 (예: 602). 비워두면 전체.'
+        required: false
+        default: ''
+      force:
+        description: '기존 mp3도 다시 생성'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write  # audio/ 폴더 커밋 푸시를 위해 필요
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install openai gspread oauth2client
+
+      - name: Write service account key
+        env:
+          GCP_SERVICE_KEY_JSON: ${{ secrets.GCP_SERVICE_KEY_JSON }}
+        run: |
+          printf '%s' "$GCP_SERVICE_KEY_JSON" > service_key.json
+
+      - name: Write OpenAI key file
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          printf '%s' "$OPENAI_API_KEY" > openai_key.txt
+
+      - name: Run generate_tts.py
+        run: |
+          ARGS="--yes"
+          if [ -n "${{ inputs.chapter }}" ]; then
+            ARGS="$ARGS --chapter ${{ inputs.chapter }}"
+          fi
+          if [ "${{ inputs.force }}" = "true" ]; then
+            ARGS="$ARGS --force"
+          fi
+          python generate_tts.py $ARGS
+
+      - name: Clean up secret files
+        if: always()
+        run: |
+          rm -f service_key.json openai_key.txt
+
+      - name: Check for new audio files
+        id: check_audio
+        run: |
+          if [ -d audio ] && [ -n "$(find audio -name '*.mp3' -type f 2>/dev/null)" ]; then
+            if [ -n "$(git status --porcelain audio/)" ]; then
+              echo "has_changes=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push audio files
+        if: steps.check_audio.outputs.has_changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add audio/
+          git commit -m "🎙️ Add TTS audio files (auto-generated)"
+          git push
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.check_audio.outputs.has_changes }}" = "true" ]; then
+            echo "✅ 새 mp3 파일이 커밋되었습니다."
+          else
+            echo "ℹ️ 새로 생성된 mp3 파일이 없습니다 (모두 이미 존재)."
+          fi

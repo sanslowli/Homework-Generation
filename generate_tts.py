@@ -113,6 +113,7 @@ def main():
     parser.add_argument("--voice", type=str, default="shimmer", help="OpenAI voice (기본: shimmer)")
     parser.add_argument("--model", type=str, default="tts-1-hd", help="OpenAI model (기본: tts-1-hd)")
     parser.add_argument("--speed", type=float, default=1.0, help="재생 속도 (기본: 1.0)")
+    parser.add_argument("--yes", "-y", action="store_true", help="확인 프롬프트 스킵 (CI용)")
     args = parser.parse_args()
 
     # OpenAI key 확인 (환경변수 우선, 없으면 openai_key.txt 파일)
@@ -178,12 +179,15 @@ def main():
     est_cost = total_chars / 1000 * rate
     print(f"\n💰 비용 추정: {total_chars:,} 자 × ${rate}/1K = ${est_cost:.3f}")
 
-    # 사용자 확인
-    print(f"\n계속 진행하시겠어요? (model={args.model}, voice={args.voice}, speed={args.speed})")
-    ans = input("[y/N]: ").strip().lower()
-    if ans not in ("y", "yes"):
-        print("취소됨.")
-        return
+    # 사용자 확인 (--yes 면 스킵)
+    if not args.yes:
+        print(f"\n계속 진행하시겠어요? (model={args.model}, voice={args.voice}, speed={args.speed})")
+        ans = input("[y/N]: ").strip().lower()
+        if ans not in ("y", "yes"):
+            print("취소됨.")
+            return
+    else:
+        print(f"\n--yes 플래그로 자동 진행 (model={args.model}, voice={args.voice}, speed={args.speed})")
 
     # 실제 생성
     print("\n🎙️ 음성 생성 시작...\n")
