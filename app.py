@@ -636,6 +636,28 @@ def get_all_student_names():
     return sorted(names)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def get_students_with_chapter_folder(chapter):
+    """특정 챕터(예: '602') 폴더가 현행/지난 챕터 하위에 있는 학생 이름 목록."""
+    chapter = str(chapter)
+    students = set()
+    for folder_name in TARGET_FOLDERS:
+        target_path = os.path.join(BASE_FOLDER, folder_name)
+        if not os.path.exists(target_path):
+            continue
+        try:
+            for student_d in os.listdir(target_path):
+                if student_d.startswith('.'):
+                    continue
+                for sub in ALLOWED_SUBFOLDERS:
+                    if os.path.exists(os.path.join(target_path, student_d, sub, chapter)):
+                        students.add(student_d)
+                        break
+        except Exception:
+            continue
+    return sorted(students)
+
+
 def get_attendance(client, student_name, year, month):
     df = get_data_from_sheet(client)
     if df.empty: return set()
@@ -1682,15 +1704,16 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
             st.session_state['answer_bank'] = load_answer_bank(client) if client else {}
         if 'image_matchings' not in st.session_state:
             st.session_state['image_matchings'] = load_image_matchings(client) if client else {}
-        if 'all_student_names' not in st.session_state:
-            st.session_state['all_student_names'] = get_all_student_names()
+
+        # 챕터별 학생 후보 (해당 챕터 폴더가 있는 학생만)
+        _chapter_students = get_students_with_chapter_folder(current_chapter)
 
         # 매칭 안된 그림이면 이미지 위에 picker 노출
         render_match_picker(
             current_img_path,
             st.session_state['student_name'],
             current_chapter,
-            st.session_state['all_student_names'],
+            _chapter_students,
             st.session_state['image_matchings'],
             client,
             key_suffix="play",
@@ -1717,7 +1740,7 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
             current_img_path,
             st.session_state['student_name'],
             current_chapter,
-            st.session_state['all_student_names'],
+            _chapter_students,
             st.session_state['answer_bank'],
             st.session_state['image_matchings'],
             client,
@@ -1755,23 +1778,23 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                 # 결과 목록: 이미지 + O/X + 정답 듣기 (매칭/음원 기반)
                 _ans_bank = st.session_state.get('answer_bank') or (load_answer_bank(client) if client else {})
                 _img_match = st.session_state.get('image_matchings') or (load_image_matchings(client) if client else {})
-                _all_names = st.session_state.get('all_student_names') or get_all_student_names()
                 st.markdown("#### 📋 라운드 복기")
                 r_cols = st.columns(2)
                 for _ri, _r in enumerate(results):
                     with r_cols[_ri % 2]:
                         _fname = os.path.basename(_r['file'])
                         _chapter = os.path.basename(os.path.dirname(_r['file']))
+                        _chapter_students = get_students_with_chapter_folder(_chapter)
                         _mark = "🟢 O" if _r['result'] == 'O' else "🔴 X"
                         st.markdown(f"**{_mark}** · `{_fname}`")
                         display_responsive_image(_r['file'], is_grid=True)
                         render_match_picker(
                             _r['file'], st.session_state['student_name'], _chapter,
-                            _all_names, _img_match, client, key_suffix=f"result_{_ri}"
+                            _chapter_students, _img_match, client, key_suffix=f"result_{_ri}"
                         )
                         render_image_answer_widget(
                             _r['file'], st.session_state['student_name'], _chapter,
-                            _all_names, _ans_bank, _img_match, client, key_suffix=f"result_{_ri}"
+                            _chapter_students, _ans_bank, _img_match, client, key_suffix=f"result_{_ri}"
                         )
                         st.markdown("&nbsp;", unsafe_allow_html=True)
 
@@ -1820,22 +1843,22 @@ elif st.session_state['mode'] == 'daily_result':
     with st.expander("📋 오늘의 라운드 복기 · 정답 듣기", expanded=False):
         _ans_bank_d = st.session_state.get('answer_bank') or (load_answer_bank(client) if client else {})
         _img_match_d = st.session_state.get('image_matchings') or (load_image_matchings(client) if client else {})
-        _all_names_d = st.session_state.get('all_student_names') or get_all_student_names()
         d_cols = st.columns(2)
         for _di, _dr in enumerate(results):
             with d_cols[_di % 2]:
                 _dfname = os.path.basename(_dr['file'])
                 _dchapter = os.path.basename(os.path.dirname(_dr['file']))
+                _dchapter_students = get_students_with_chapter_folder(_dchapter)
                 _dmark = "🟢 O" if _dr['result'] == 'O' else "🔴 X"
                 st.markdown(f"**{_dmark}** · `{_dfname}`")
                 display_responsive_image(_dr['file'], is_grid=True)
                 render_match_picker(
                     _dr['file'], st.session_state['student_name'], _dchapter,
-                    _all_names_d, _img_match_d, client, key_suffix=f"daily_{_di}"
+                    _dchapter_students, _img_match_d, client, key_suffix=f"daily_{_di}"
                 )
                 render_image_answer_widget(
                     _dr['file'], st.session_state['student_name'], _dchapter,
-                    _all_names_d, _ans_bank_d, _img_match_d, client, key_suffix=f"daily_{_di}"
+                    _dchapter_students, _ans_bank_d, _img_match_d, client, key_suffix=f"daily_{_di}"
                 )
                 st.markdown("&nbsp;", unsafe_allow_html=True)
 
@@ -1861,7 +1884,6 @@ elif st.session_state['mode'] == 'records':
     # 새 정답 시스템 데이터 로드
     answer_bank_rec = load_answer_bank(client) if client else {}
     img_match_rec = load_image_matchings(client) if client else {}
-    all_names_rec = get_all_student_names()
 
     if all_imgs and 'db_data' in st.session_state:
         cols = st.columns(3)
@@ -1873,13 +1895,14 @@ elif st.session_state['mode'] == 'records':
                 hist_str = " ".join([f"{h}" for h in history])
                 st.caption(f"타율: :{color}[{avg*100:.0f}%] | {hist_str}")
                 ch_name_rec = os.path.basename(os.path.dirname(img_path))
+                chapter_students_rec = get_students_with_chapter_folder(ch_name_rec)
                 render_match_picker(
                     img_path, st.session_state['student_name'], ch_name_rec,
-                    all_names_rec, img_match_rec, client, key_suffix=f"rec_{i}"
+                    chapter_students_rec, img_match_rec, client, key_suffix=f"rec_{i}"
                 )
                 render_image_answer_widget(
                     img_path, st.session_state['student_name'], ch_name_rec,
-                    all_names_rec, answer_bank_rec, img_match_rec, client, key_suffix=f"rec_{i}"
+                    chapter_students_rec, answer_bank_rec, img_match_rec, client, key_suffix=f"rec_{i}"
                 )
 
 elif st.session_state['mode'] == 'help':
