@@ -9,6 +9,7 @@
 
 # 3. 절대 올라가면 안 되는 보안 파일 차단
 service_key.json
+openai_key.txt
 
 # 4. 파이썬 캐시 파일 차단 (앱 구동시 생기는 찌꺼기)
 __pycache__/
