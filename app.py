@@ -1146,12 +1146,18 @@ if url_teacher == "1":
         if not ans_student:
             st.stop()
 
-        # 각 변형(basic/advanced)별로 구간과 샘플 이미지 추출
-        # 우선순위: 해당 학생 본인 폴더 → 없으면 다른 학생들 폴더의 합집합 (등록 누락 방지)
+        # 각 변형(basic/advanced)별로 구간 1-4 항상 노출 + 실제 그림이 있으면 샘플로 표시
+        # 그림 파일 존재 여부와 무관하게 입력 항상 가능
+        DEFAULT_SECTIONS = ["1", "2", "3", "4"]
+
         def collect_sections_for_variant(ch_name):
-            """{section: sample_image_path} 반환. 학생 본인 폴더 우선, 없으면 다른 학생들 폴더 합집합."""
+            """{section: sample_image_path or None} 반환.
+            구간 1~4는 무조건 포함, 파일에서 더 큰 번호가 발견되면 추가로 포함.
+            샘플 이미지: 본인 폴더 우선, 없으면 다른 학생 폴더."""
             if not ch_name:
                 return {}
+            sections_map = {sec: None for sec in DEFAULT_SECTIONS}
+
             own_sections = {}
             other_sections = {}
             for (folder_n, stu, sub) in chapter_index.get(ch_name, []):
@@ -1170,8 +1176,15 @@ if url_teacher == "1":
                                     other_sections.setdefault(sec, full_path)
                 except Exception:
                     pass
-            # 본인 폴더가 있으면 본인 것만 사용, 없으면 다른 학생들 합집합
-            return own_sections if own_sections else other_sections
+
+            # 본인 폴더 우선으로 샘플 이미지 매핑, 본인에 없으면 다른 학생 거 사용
+            for sec, path in own_sections.items():
+                sections_map[sec] = path
+            for sec, path in other_sections.items():
+                if sections_map.get(sec) is None:
+                    sections_map[sec] = path
+
+            return sections_map
 
         advanced_sections = collect_sections_for_variant(ch_advanced)
         basic_sections = collect_sections_for_variant(ch_basic)
