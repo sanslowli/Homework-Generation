@@ -1060,8 +1060,8 @@ if url_teacher == "1":
             st.error("구글 시트 연결 실패")
             st.stop()
 
-        # 전체 챕터 목록 (모든 학생 폴더에서 수집)
-        all_chapters = set()
+        # 전체 챕터 목록 + 폴더 인덱스 (chapter → list of (folder, student, sub) tuples)
+        chapter_index = {}  # {chapter_name: [(folder, student, sub), ...]}
         for folder_name in TARGET_FOLDERS:
             target_path = os.path.join(BASE_FOLDER, folder_name)
             if not os.path.exists(target_path):
@@ -1075,38 +1075,64 @@ if url_teacher == "1":
                         try:
                             for ch in os.listdir(sub_path):
                                 if not ch.startswith('.') and os.path.isdir(os.path.join(sub_path, ch)):
-                                    all_chapters.add(ch)
+                                    chapter_index.setdefault(ch, []).append((folder_name, student_d, sub))
                         except Exception:
                             pass
-        all_chapters_sorted = sorted(all_chapters)
-        if not all_chapters_sorted:
+        all_chapters = set(chapter_index.keys())
+        if not all_chapters:
             st.warning("챕터를 찾을 수 없습니다.")
             st.stop()
+
+        # 챕터 그룹핑: "602"와 "602S"가 둘 다 있으면 "602(S)" 로 묶음
+        # 명명 규칙: S 접미사 = 기초, 접미사 없음 = 심화
+        # display_name -> {"basic": "602S" or None, "advanced": "602" or None}
+        chapter_groups = {}
+        for ch in all_chapters:
+            if ch.endswith('S'):
+                # S 붙은 것 = 기초
+                base = ch[:-1]
+                if base in all_chapters:
+                    display = f"{base}(S)"
+                    chapter_groups.setdefault(display, {"basic": None, "advanced": None})["basic"] = ch
+                else:
+                    chapter_groups.setdefault(ch, {"basic": None, "advanced": None})["basic"] = ch
+            else:
+                # S 안 붙은 것 = 심화
+                s_variant = ch + "S"
+                if s_variant in all_chapters:
+                    display = f"{ch}(S)"
+                    chapter_groups.setdefault(display, {"basic": None, "advanced": None})["advanced"] = ch
+                else:
+                    chapter_groups.setdefault(ch, {"basic": None, "advanced": None})["advanced"] = ch
+
+        # 정렬 키: 숫자 부분으로 정렬, 같은 숫자면 (S) 우선
+        def _ch_sort_key(d):
+            digits = ''.join(c for c in d if c.isdigit())
+            return (int(digits) if digits else 0, d)
+        chapter_display_names = sorted(chapter_groups.keys(), key=_ch_sort_key)
 
         ans_bank_t = load_answer_bank(client)
 
         col_ch, col_stu = st.columns([1, 1])
         with col_ch:
-            ans_chapter = st.selectbox("챕터", all_chapters_sorted, key="t_ans_chapter")
+            ans_chapter_display = st.selectbox("챕터", chapter_display_names, key="t_ans_chapter")
 
-        # 선택된 챕터에 폴더가 있는 학생만 추출
+        group_info = chapter_groups[ans_chapter_display]
+        ch_basic = group_info["basic"]       # 기초 챕터명 (예: "602"), 없으면 None
+        ch_advanced = group_info["advanced"] # 심화 챕터명 (예: "602S"), 없으면 None
+
+        # 학생 후보: basic 또는 advanced 폴더 중 하나라도 있는 학생 합집합
         students_with_chapter = set()
-        for folder_name in TARGET_FOLDERS:
-            t_path = os.path.join(BASE_FOLDER, folder_name)
-            if not os.path.exists(t_path):
+        for ch_name in (ch_basic, ch_advanced):
+            if not ch_name:
                 continue
-            for student_d in os.listdir(t_path):
-                if student_d.startswith('.'):
-                    continue
-                for sub in ALLOWED_SUBFOLDERS:
-                    ch_path = os.path.join(t_path, student_d, sub, ans_chapter)
-                    if os.path.exists(ch_path):
-                        students_with_chapter.add(student_d)
-                        break
+            for (_f, stu, _sub) in chapter_index.get(ch_name, []):
+                students_with_chapter.add(stu)
         students_with_chapter_sorted = sorted(students_with_chapter)
+
         with col_stu:
             if not students_with_chapter_sorted:
-                st.warning(f"챕터 {ans_chapter} 폴더를 가진 학생이 없습니다.")
+                st.warning(f"챕터 {ans_chapter_display} 폴더를 가진 학생이 없습니다.")
                 ans_student = None
             else:
                 ans_student = st.selectbox("학생", students_with_chapter_sorted, key="t_ans_student")
@@ -1114,71 +1140,128 @@ if url_teacher == "1":
         if not ans_student:
             st.stop()
 
-        # 선택된 학생의 챕터 폴더에서 구간 추출
-        sections_set = set()
-        sample_images_by_section = {}  # {section: image_path}
-        for folder_name in TARGET_FOLDERS:
-            for sub in ALLOWED_SUBFOLDERS:
-                ch_path = os.path.join(BASE_FOLDER, folder_name, ans_student, sub, ans_chapter)
+        # 각 변형(basic/advanced)별로 구간과 샘플 이미지 추출
+        # 우선순위: 해당 학생 본인 폴더 → 없으면 다른 학생들 폴더의 합집합 (등록 누락 방지)
+        def collect_sections_for_variant(ch_name):
+            """{section: sample_image_path} 반환. 학생 본인 폴더 우선, 없으면 다른 학생들 폴더 합집합."""
+            if not ch_name:
+                return {}
+            own_sections = {}
+            other_sections = {}
+            for (folder_n, stu, sub) in chapter_index.get(ch_name, []):
+                ch_path = os.path.join(BASE_FOLDER, folder_n, stu, sub, ch_name)
                 if not os.path.exists(ch_path):
                     continue
                 try:
-                    for f in os.listdir(ch_path):
+                    for f in sorted(os.listdir(ch_path)):
                         if f.lower().endswith(('.png', '.jpg', '.jpeg')):
                             sec = extract_section_from_filename(f)
                             if sec:
-                                sections_set.add(sec)
-                                sample_images_by_section.setdefault(sec, os.path.join(ch_path, f))
+                                full_path = os.path.join(ch_path, f)
+                                if stu == ans_student:
+                                    own_sections.setdefault(sec, full_path)
+                                else:
+                                    other_sections.setdefault(sec, full_path)
                 except Exception:
                     pass
-        sections_sorted = sorted(sections_set, key=lambda x: int(x) if x.isdigit() else 0)
+            # 본인 폴더가 있으면 본인 것만 사용, 없으면 다른 학생들 합집합
+            return own_sections if own_sections else other_sections
 
-        if not sections_sorted:
-            st.warning(f"{ans_student}의 {ans_chapter} 폴더에 인식 가능한 구간 파일이 없습니다.")
+        advanced_sections = collect_sections_for_variant(ch_advanced)
+        basic_sections = collect_sections_for_variant(ch_basic)
+
+        adv_sorted = sorted(advanced_sections.keys(), key=lambda x: int(x) if x.isdigit() else 0)
+        bas_sorted = sorted(basic_sections.keys(), key=lambda x: int(x) if x.isdigit() else 0)
+
+        if not adv_sorted and not bas_sorted:
+            st.warning(f"{ans_student}의 {ans_chapter_display} 에 인식 가능한 구간이 없습니다.")
             st.stop()
 
-        st.markdown(f"### 📘 {ans_chapter} · {ans_student}")
-        st.caption(f"이 학생의 챕터 {ans_chapter} 에는 구간 {len(sections_sorted)}개가 있습니다. 각 구간의 문장을 입력하세요.")
+        st.markdown(f"### 📘 {ans_chapter_display} · {ans_student}")
+        _info_parts = []
+        if adv_sorted:
+            _info_parts.append(f"심화({ch_advanced}) 구간 {len(adv_sorted)}개")
+        if bas_sorted:
+            _info_parts.append(f"기초({ch_basic}) 구간 {len(bas_sorted)}개")
+        st.caption(" · ".join(_info_parts))
 
-        with st.form(key=f"answer_form_{ans_chapter}_{ans_student}"):
-            new_values = {}
-            for sec in sections_sorted:
-                existing = ans_bank_t.get((str(ans_chapter), str(sec), ans_student), "")
-                _lines = max(3, min(8, existing.count("\n") + 2)) if existing else 4
-                # 구간 헤더 + 참고 이미지 토글
-                _icon = '✅' if existing else '⚪'
-                st.markdown(f"**구간 {sec}** {_icon}")
-                sample_img = sample_images_by_section.get(sec)
-                if sample_img and os.path.exists(sample_img):
-                    with st.expander(f"🖼️ 구간 {sec} 그림 보기", expanded=False):
-                        display_responsive_image(sample_img, is_grid=True)
-                        st.caption(os.path.basename(sample_img))
-                val = st.text_area(
-                    label=f"구간 {sec}",
-                    value=existing,
-                    key=f"t_ans_{ans_chapter}_{ans_student}_{sec}",
-                    height=_lines * 28 + 20,
-                    label_visibility="collapsed",
-                    placeholder="예) He has been super lately.\nHe got too excited about going to the gym.\n...",
+        with st.form(key=f"answer_form_{ans_chapter_display}_{ans_student}"):
+            new_values = []  # [(chapter_name, section, label_for_msg, value)]
+
+            # ── 심화(S) 먼저 ──
+            if ch_advanced and adv_sorted:
+                st.markdown(
+                    '<div style="background:#FFEBEE;border-left:4px solid #E74C3C;padding:8px 14px;'
+                    'margin:8px 0 4px 0;border-radius:4px;">'
+                    f'<b>심화 — {ch_advanced}</b></div>',
+                    unsafe_allow_html=True
                 )
-                new_values[sec] = val
-                st.markdown("&nbsp;", unsafe_allow_html=True)
+                for sec in adv_sorted:
+                    existing = ans_bank_t.get((str(ch_advanced), str(sec), ans_student), "")
+                    _lines = max(3, min(8, existing.count("\n") + 2)) if existing else 4
+                    _icon = '✅' if existing else '⚪'
+                    st.markdown(f"**심화 구간 {sec}** {_icon}")
+                    sample_img = advanced_sections.get(sec)
+                    if sample_img and os.path.exists(sample_img):
+                        with st.expander(f"🖼️ 심화 구간 {sec} 그림 보기", expanded=False):
+                            display_responsive_image(sample_img, is_grid=True)
+                            st.caption(os.path.basename(sample_img))
+                    val = st.text_area(
+                        label=f"심화 {sec}",
+                        value=existing,
+                        key=f"t_ans_adv_{ch_advanced}_{ans_student}_{sec}",
+                        height=_lines * 28 + 20,
+                        label_visibility="collapsed",
+                        placeholder="심화 문장 입력...",
+                    )
+                    new_values.append((ch_advanced, sec, f"심화 {sec}", val))
+                    st.markdown("&nbsp;", unsafe_allow_html=True)
+
+            # ── 기초(non-S) ──
+            if ch_basic and bas_sorted:
+                st.markdown(
+                    '<div style="background:#E3F2FD;border-left:4px solid #2980B9;padding:8px 14px;'
+                    'margin:12px 0 4px 0;border-radius:4px;">'
+                    f'<b>기초 — {ch_basic}</b></div>',
+                    unsafe_allow_html=True
+                )
+                for sec in bas_sorted:
+                    existing = ans_bank_t.get((str(ch_basic), str(sec), ans_student), "")
+                    _lines = max(3, min(8, existing.count("\n") + 2)) if existing else 4
+                    _icon = '✅' if existing else '⚪'
+                    st.markdown(f"**기초 구간 {sec}** {_icon}")
+                    sample_img = basic_sections.get(sec)
+                    if sample_img and os.path.exists(sample_img):
+                        with st.expander(f"🖼️ 기초 구간 {sec} 그림 보기", expanded=False):
+                            display_responsive_image(sample_img, is_grid=True)
+                            st.caption(os.path.basename(sample_img))
+                    val = st.text_area(
+                        label=f"기초 {sec}",
+                        value=existing,
+                        key=f"t_ans_bas_{ch_basic}_{ans_student}_{sec}",
+                        height=_lines * 28 + 20,
+                        label_visibility="collapsed",
+                        placeholder="기초 문장 입력...",
+                    )
+                    new_values.append((ch_basic, sec, f"기초 {sec}", val))
+                    st.markdown("&nbsp;", unsafe_allow_html=True)
+
             submitted = st.form_submit_button("💾 모두 저장", use_container_width=True, type="primary")
 
         if submitted:
             saved_count = 0
             skipped_count = 0
-            for sec, val in new_values.items():
+            for ch_name, sec, label, val in new_values:
                 trimmed = val.strip()
-                existing = ans_bank_t.get((str(ans_chapter), str(sec), ans_student), "")
+                existing = ans_bank_t.get((str(ch_name), str(sec), ans_student), "")
                 if trimmed == existing:
                     continue
-                if save_answer_bank(client, ans_chapter, sec, ans_student, trimmed):
+                if save_answer_bank(client, ch_name, sec, ans_student, trimmed):
                     saved_count += 1
                 else:
                     skipped_count += 1
             if saved_count > 0:
-                st.success(f"✅ 구간 {saved_count}개 정답 저장 완료")
+                st.success(f"✅ 항목 {saved_count}개 정답 저장 완료")
             if skipped_count > 0:
                 st.warning(f"⚠️ {skipped_count}개 저장 실패")
             if saved_count == 0 and skipped_count == 0:
