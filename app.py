@@ -662,8 +662,18 @@ def get_all_student_names():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_students_with_chapter_folder(chapter):
-    """특정 챕터(예: '602') 폴더가 현행/지난 챕터 하위에 있는 학생 이름 목록."""
+    """특정 챕터(예: '602') 폴더가 현행/지난 챕터 하위에 있는 학생 이름 목록.
+    페어 챕터 처리: '602' 검색 시 '602S' 폴더 가진 학생도 포함 (그 반대도 동일).
+    602와 602S는 자매 코스로 묶여있어 매칭 후보로 동일하게 취급."""
     chapter = str(chapter)
+
+    # 페어 챕터 자동 확장
+    chapters_to_check = {chapter}
+    if chapter.endswith('S'):
+        chapters_to_check.add(chapter[:-1])
+    else:
+        chapters_to_check.add(chapter + 'S')
+
     students = set()
     for folder_name in TARGET_FOLDERS:
         target_path = os.path.join(BASE_FOLDER, folder_name)
@@ -674,8 +684,14 @@ def get_students_with_chapter_folder(chapter):
                 if student_d.startswith('.'):
                     continue
                 for sub in ALLOWED_SUBFOLDERS:
-                    if os.path.exists(os.path.join(target_path, student_d, sub, chapter)):
-                        students.add(student_d)
+                    sub_path = os.path.join(target_path, student_d, sub)
+                    if not os.path.exists(sub_path):
+                        continue
+                    for ch in chapters_to_check:
+                        if os.path.exists(os.path.join(sub_path, ch)):
+                            students.add(student_d)
+                            break
+                    if student_d in students:
                         break
         except Exception:
             continue
