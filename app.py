@@ -555,9 +555,10 @@ def render_match_picker(image_path, image_student, chapter, all_students, image_
 
 def render_image_answer_widget(image_path, image_student, chapter, all_students, answer_bank, image_matchings, client, key_suffix=""):
     """이미지 아래에 표시되는 위젯.
-    매칭된 경우 + 음원 있음: 🔊 정답 듣기 버튼
-    매칭된 경우 + 음원 없음: '정답 미입력' 캡션
-    매칭 안된 경우: 표시 안 함 (위쪽 picker 가 처리)"""
+    매칭됨 + 음원 있음                → 🔊 정답 듣기
+    매칭됨 + 정답 있음 + 음원 없음   → 🕐 음원 생성 대기 중
+    매칭됨 + 정답 자체 없음           → ⚠️ 정답 미입력
+    매칭 안됨                          → 표시 안 함 (위쪽 picker 가 처리)"""
     image_filename = os.path.basename(image_path)
     chapter_str = str(chapter)
     key = (image_student, chapter_str, image_filename)
@@ -567,19 +568,32 @@ def render_image_answer_widget(image_path, image_student, chapter, all_students,
         return  # 매칭 안됨 → picker 가 위에서 처리
 
     section = extract_section_from_filename(image_filename)
+    sentences = ""
     audio_abs = None
     if section:
+        sentences = answer_bank.get((chapter_str, section, content_owner), "")
         audio_abs = get_audio_absolute_path(chapter_str, section, content_owner)
     audio_exists = bool(audio_abs and os.path.exists(audio_abs))
+    has_sentences = bool(sentences and sentences.strip())
 
     if audio_exists:
         render_audio_player(audio_abs)
-    else:
+    elif has_sentences:
+        # 정답은 있는데 음원만 아직 안 만든 상태 (다음 TTS 트리거에서 만들어짐)
         st.markdown(
-            '<div style="margin:0;color:#999;font-size:14px;padding:12px 14px;'
-            'border:1px dashed #ddd;border-radius:6px;text-align:center;'
-            'font-family:-apple-system,system-ui,sans-serif;">'
-            '정답 미입력</div>',
+            '<div style="margin:0;color:#7B6F00;background:#FFF8E1;font-size:14px;'
+            'padding:12px 14px;border:1px solid #F0D070;border-radius:6px;'
+            'text-align:center;font-family:-apple-system,system-ui,sans-serif;">'
+            '🕐 음원 생성 대기 중</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        # 정답 자체가 등록 안 됨
+        st.markdown(
+            '<div style="margin:0;color:#999;background:#fafafa;font-size:14px;'
+            'padding:12px 14px;border:1px dashed #ddd;border-radius:6px;'
+            'text-align:center;font-family:-apple-system,system-ui,sans-serif;">'
+            '⚠️ 정답 미입력</div>',
             unsafe_allow_html=True
         )
 
