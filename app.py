@@ -190,7 +190,8 @@ def get_or_create_answer_bank_sheet(client):
         if not header:
             ws.append_row(ANSWER_BANK_HEADER)
         return ws
-    except Exception:
+    except Exception as e:
+        st.error(f"[디버그] get_or_create_answer_bank_sheet 에러: {type(e).__name__}: {e}")
         return None
 
 def get_or_create_image_matching_sheet(client):
@@ -218,6 +219,7 @@ def load_answer_bank(_client):
     try:
         ws = get_or_create_answer_bank_sheet(_client)
         if ws is None:
+            st.error("[디버그] load_answer_bank: 워크시트를 가져오지 못함")
             return {}
         rows = ws.get_all_records()
         result = {}
@@ -229,16 +231,19 @@ def load_answer_bank(_client):
             if chapter and section and owner and sentences:
                 result[(chapter, section, owner)] = sentences
         return result
-    except Exception:
+    except Exception as e:
+        st.error(f"[디버그] load_answer_bank 에러: {type(e).__name__}: {e}")
         return {}
 
 def save_answer_bank(client, chapter, section, owner, sentences):
     """(Chapter, Section, Owner) 키로 upsert."""
     if client is None:
+        st.error("[디버그] client 가 None 입니다 — 구글 시트 인증 실패")
         return False
     try:
         ws = get_or_create_answer_bank_sheet(client)
         if ws is None:
+            st.error("[디버그] AnswerBank 워크시트를 가져오지 못했습니다")
             return False
         rows = ws.get_all_values()
         timestamp = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
@@ -253,7 +258,8 @@ def save_answer_bank(client, chapter, section, owner, sentences):
             ws.append_row([str(chapter), str(section), owner, sentences, timestamp])
         load_answer_bank.clear()
         return True
-    except Exception:
+    except Exception as e:
+        st.error(f"[디버그] save_answer_bank 에러: {type(e).__name__}: {e}")
         return False
 
 @st.cache_data(ttl=60, show_spinner=False)
