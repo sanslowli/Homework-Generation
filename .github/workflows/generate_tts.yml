@@ -21,6 +21,12 @@ on:
 permissions:
   contents: write  # audio/ 폴더 커밋 푸시를 위해 필요
 
+# 동시에 여러 번 트리거되어도 한 번에 하나만 실행 (충돌·중복 생성 방지)
+# 진행 중인 작업이 있으면 새 트리거는 줄 서서 대기. 이미 대기 중인 작업이 있으면 그것을 새 것으로 교체.
+concurrency:
+  group: tts-generation
+  cancel-in-progress: false
+
 jobs:
   generate:
     runs-on: ubuntu-latest

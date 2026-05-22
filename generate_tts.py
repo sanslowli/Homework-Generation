@@ -15,7 +15,7 @@ generate_tts.py — AnswerBank 기준으로 OpenAI TTS mp3 파일 생성
      --chapter 602    특정 챕터만 처리
      --voice shimmer  음성 변경 (기본: shimmer)
      --model tts-1-hd 모델 변경 (기본: tts-1-hd)
-     --speed 1.0      재생 속도 (기본: 1.0)
+     --speed 0.9      재생 속도 (기본: 0.9)
 
 [동작]
 - Google Sheet 의 AnswerBank 시트를 읽어옴
@@ -112,7 +112,7 @@ def main():
     parser.add_argument("--chapter", type=str, default=None, help="특정 챕터만 처리")
     parser.add_argument("--voice", type=str, default="shimmer", help="OpenAI voice (기본: shimmer)")
     parser.add_argument("--model", type=str, default="tts-1-hd", help="OpenAI model (기본: tts-1-hd)")
-    parser.add_argument("--speed", type=float, default=1.0, help="재생 속도 (기본: 1.0)")
+    parser.add_argument("--speed", type=float, default=0.9, help="재생 속도 (기본: 0.9)")
     parser.add_argument("--yes", "-y", action="store_true", help="확인 프롬프트 스킵 (CI용)")
     args = parser.parse_args()
 
