@@ -1054,7 +1054,7 @@ if url_teacher == "1":
     # ── 정답 입력 페이지 ──
     if teacher_view == "answers":
         st.title("📝 AnswerBank — 정답 입력")
-        st.caption("챕터 · 구간별로 각 학생의 문장을 입력합니다. 저장된 데이터는 generate_tts.py 가 mp3 로 변환합니다.")
+        st.caption("챕터·학생 선택 후 각 구간의 문장을 입력합니다. 저장된 데이터는 GitHub Actions 의 'Generate TTS Audio' 워크플로우가 mp3 로 변환합니다.")
 
         if not client:
             st.error("구글 시트 연결 실패")
@@ -1085,13 +1085,12 @@ if url_teacher == "1":
 
         ans_bank_t = load_answer_bank(client)
 
-        col_ch, col_sec = st.columns([1, 1])
+        col_ch, col_stu = st.columns([1, 1])
         with col_ch:
             ans_chapter = st.selectbox("챕터", all_chapters_sorted, key="t_ans_chapter")
-        # 선택된 챕터에 존재하는 구간 추출 (모든 학생 폴더의 이미지 파일명에서)
-        sections_set = set()
-        students_in_ch = set()
-        sample_images_by_section = {}  # {section: (folder, student, image_path)}
+
+        # 선택된 챕터에 폴더가 있는 학생만 추출
+        students_with_chapter = set()
         for folder_name in TARGET_FOLDERS:
             t_path = os.path.join(BASE_FOLDER, folder_name)
             if not os.path.exists(t_path):
@@ -1101,85 +1100,145 @@ if url_teacher == "1":
                     continue
                 for sub in ALLOWED_SUBFOLDERS:
                     ch_path = os.path.join(t_path, student_d, sub, ans_chapter)
-                    if not os.path.exists(ch_path):
-                        continue
-                    students_in_ch.add(student_d)
-                    try:
-                        for f in os.listdir(ch_path):
-                            if f.lower().endswith(('.png', '.jpg', '.jpeg')):
-                                sec = extract_section_from_filename(f)
-                                if sec:
-                                    sections_set.add(sec)
-                                    sample_images_by_section.setdefault(sec, os.path.join(ch_path, f))
-                    except Exception:
-                        pass
-        sections_sorted = sorted(sections_set, key=lambda x: int(x) if x.isdigit() else 0)
-        with col_sec:
-            ans_section = st.selectbox("구간", sections_sorted, key="t_ans_section") if sections_sorted else None
+                    if os.path.exists(ch_path):
+                        students_with_chapter.add(student_d)
+                        break
+        students_with_chapter_sorted = sorted(students_with_chapter)
+        with col_stu:
+            if not students_with_chapter_sorted:
+                st.warning(f"챕터 {ans_chapter} 폴더를 가진 학생이 없습니다.")
+                ans_student = None
+            else:
+                ans_student = st.selectbox("학생", students_with_chapter_sorted, key="t_ans_student")
 
-        if not ans_section:
-            st.info("이 챕터에 인식된 구간이 없습니다.")
+        if not ans_student:
             st.stop()
 
-        st.markdown(f"### 📘 {ans_chapter} · 구간 {ans_section}")
-        st.caption(f"이 챕터에는 학생 {len(students_in_ch)}명, 구간 {len(sections_sorted)}개가 있습니다.")
+        # 선택된 학생의 챕터 폴더에서 구간 추출
+        sections_set = set()
+        sample_images_by_section = {}  # {section: image_path}
+        for folder_name in TARGET_FOLDERS:
+            for sub in ALLOWED_SUBFOLDERS:
+                ch_path = os.path.join(BASE_FOLDER, folder_name, ans_student, sub, ans_chapter)
+                if not os.path.exists(ch_path):
+                    continue
+                try:
+                    for f in os.listdir(ch_path):
+                        if f.lower().endswith(('.png', '.jpg', '.jpeg')):
+                            sec = extract_section_from_filename(f)
+                            if sec:
+                                sections_set.add(sec)
+                                sample_images_by_section.setdefault(sec, os.path.join(ch_path, f))
+                except Exception:
+                    pass
+        sections_sorted = sorted(sections_set, key=lambda x: int(x) if x.isdigit() else 0)
 
-        # 참고 이미지 미리보기 (한 학생의 같은 구간 그림 하나 표시)
-        sample_img = sample_images_by_section.get(ans_section)
-        if sample_img and os.path.exists(sample_img):
-            with st.expander("🖼️ 이 구간의 그림 예시 보기", expanded=False):
-                display_responsive_image(sample_img, is_grid=True)
-                st.caption(f"{os.path.basename(sample_img)} (참고용)")
+        if not sections_sorted:
+            st.warning(f"{ans_student}의 {ans_chapter} 폴더에 인식 가능한 구간 파일이 없습니다.")
+            st.stop()
 
-        # 전체 학생 목록 (시스템 전체에서 — 이 챕터에 폴더가 없는 학생도 정답은 등록 가능)
-        all_students_t = get_all_student_names()
+        st.markdown(f"### 📘 {ans_chapter} · {ans_student}")
+        st.caption(f"이 학생의 챕터 {ans_chapter} 에는 구간 {len(sections_sorted)}개가 있습니다. 각 구간의 문장을 입력하세요.")
 
-        # 각 학생별 입력 필드
-        students_to_show = sorted(students_in_ch | set(all_students_t))
-        st.info("각 학생의 구간 문장을 입력하세요. Enter 로 줄바꿈하면 여러 문장도 됩니다. 비어있으면 저장 안 함.")
-
-        with st.form(key=f"answer_form_{ans_chapter}_{ans_section}"):
+        with st.form(key=f"answer_form_{ans_chapter}_{ans_student}"):
             new_values = {}
-            for stu in students_to_show:
-                existing = ans_bank_t.get((str(ans_chapter), str(ans_section), stu), "")
+            for sec in sections_sorted:
+                existing = ans_bank_t.get((str(ans_chapter), str(sec), ans_student), "")
                 _lines = max(3, min(8, existing.count("\n") + 2)) if existing else 4
-                label_html = f"**{stu}** {'✅' if existing else '⚪'}"
-                st.markdown(label_html)
+                # 구간 헤더 + 참고 이미지 토글
+                _icon = '✅' if existing else '⚪'
+                st.markdown(f"**구간 {sec}** {_icon}")
+                sample_img = sample_images_by_section.get(sec)
+                if sample_img and os.path.exists(sample_img):
+                    with st.expander(f"🖼️ 구간 {sec} 그림 보기", expanded=False):
+                        display_responsive_image(sample_img, is_grid=True)
+                        st.caption(os.path.basename(sample_img))
                 val = st.text_area(
-                    label=stu,
+                    label=f"구간 {sec}",
                     value=existing,
-                    key=f"t_ans_{ans_chapter}_{ans_section}_{stu}",
+                    key=f"t_ans_{ans_chapter}_{ans_student}_{sec}",
                     height=_lines * 28 + 20,
                     label_visibility="collapsed",
                     placeholder="예) He has been super lately.\nHe got too excited about going to the gym.\n...",
                 )
-                new_values[stu] = val
+                new_values[sec] = val
+                st.markdown("&nbsp;", unsafe_allow_html=True)
             submitted = st.form_submit_button("💾 모두 저장", use_container_width=True, type="primary")
 
         if submitted:
             saved_count = 0
             skipped_count = 0
-            for stu, val in new_values.items():
+            for sec, val in new_values.items():
                 trimmed = val.strip()
-                existing = ans_bank_t.get((str(ans_chapter), str(ans_section), stu), "")
+                existing = ans_bank_t.get((str(ans_chapter), str(sec), ans_student), "")
                 if trimmed == existing:
                     continue
-                if save_answer_bank(client, ans_chapter, ans_section, stu, trimmed):
+                if save_answer_bank(client, ans_chapter, sec, ans_student, trimmed):
                     saved_count += 1
                 else:
                     skipped_count += 1
             if saved_count > 0:
-                st.success(f"✅ {saved_count}명 정답 저장 완료")
+                st.success(f"✅ 구간 {saved_count}개 정답 저장 완료")
             if skipped_count > 0:
-                st.warning(f"⚠️ {skipped_count}명 저장 실패")
+                st.warning(f"⚠️ {skipped_count}개 저장 실패")
             if saved_count == 0 and skipped_count == 0:
                 st.toast("변경 사항이 없습니다.")
             else:
                 st.rerun()
 
+        # ── TTS 생성 트리거 (GitHub Actions) ──
+        st.markdown("---")
+        st.markdown("##### 🎙️ TTS 음원 생성")
+        st.caption("정답을 입력·수정한 뒤 이 버튼을 누르면 GitHub Actions 워크플로우가 새 mp3 파일을 생성하고 자동으로 커밋합니다. 보통 1~3분 소요.")
+
+        gh_pat = ""
+        gh_repo = ""
+        try:
+            gh_pat = st.secrets.get("github_pat", "")
+            gh_repo = st.secrets.get("github_repo", "")
+        except Exception:
+            pass
+
+        tts_c1, tts_c2 = st.columns([2, 1])
+        with tts_c1:
+            tts_trigger_clicked = st.button("🎙️ TTS 생성 시작", type="primary", use_container_width=True,
+                                            disabled=not (gh_pat and gh_repo))
+        with tts_c2:
+            if gh_repo:
+                actions_url = f"https://github.com/{gh_repo}/actions/workflows/generate_tts.yml"
+                st.link_button("Actions 보기", actions_url, use_container_width=True)
+
+        if not (gh_pat and gh_repo):
+            st.caption("⚠️ Streamlit secrets 에 `github_pat` 과 `github_repo` 가 설정되지 않아 버튼이 비활성화되어 있습니다.")
+
+        if tts_trigger_clicked:
+            try:
+                import requests
+                url = f"https://api.github.com/repos/{gh_repo}/actions/workflows/generate_tts.yml/dispatches"
+                r = requests.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {gh_pat}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                    json={"ref": "main"},
+                    timeout=15,
+                )
+                if r.status_code == 204:
+                    st.success("✅ TTS 생성 워크플로우가 시작되었습니다. 1~3분 후 새 mp3 파일이 자동 커밋됩니다.")
+                    st.session_state["last_tts_trigger"] = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    st.error(f"실패 (HTTP {r.status_code}): {r.text[:300]}")
+            except Exception as e:
+                st.error(f"요청 실패: {e}")
+
+        if "last_tts_trigger" in st.session_state:
+            st.caption(f"마지막 트리거 시각: {st.session_state['last_tts_trigger']}")
+
+        # ── AnswerBank 전체 상태 ──
         st.markdown("---")
         st.markdown("##### 📋 현재 AnswerBank 상태 (전체)")
-        # 전체 AnswerBank 표시
         bank_rows = []
         for (ch, sec, owner), txt in sorted(ans_bank_t.items()):
             preview = (txt[:60] + "...") if len(txt) > 60 else txt
