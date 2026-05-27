@@ -1246,13 +1246,28 @@ if url_teacher == "1":
                 if sections_map.get(sec) is None:
                     sections_map[sec] = path
 
+            # 이미 AnswerBank에 저장된 섹션도 노출 (사용자가 이전에 추가했던 5, 6, 7… 보존)
+            for (ch_key, sec_key, stu_key) in ans_bank_t.keys():
+                if str(ch_key) == str(ch_name) and stu_key == ans_student:
+                    if sec_key not in sections_map:
+                        sections_map[sec_key] = None
+
             return sections_map
 
         advanced_sections = collect_sections_for_variant(ch_advanced)
         basic_sections = collect_sections_for_variant(ch_basic)
 
-        adv_sorted = sorted(advanced_sections.keys(), key=lambda x: int(x) if x.isdigit() else 0)
-        bas_sorted = sorted(basic_sections.keys(), key=lambda x: int(x) if x.isdigit() else 0)
+        def _with_extras(sections_map, ch_name):
+            """파일/저장 기반 섹션 + 사용자가 추가한 구간(session_state)을 합쳐 정렬."""
+            sorted_secs = sorted(sections_map.keys(), key=lambda x: int(x) if x.isdigit() else 0)
+            if not ch_name or not sorted_secs:
+                return sorted_secs
+            max_n = max((int(s) for s in sorted_secs if s.isdigit()), default=0)
+            extra_n = int(st.session_state.get(f"extra_sec_{ch_name}_{ans_student}", 0))
+            return sorted_secs + [str(max_n + i + 1) for i in range(extra_n)]
+
+        adv_sorted = _with_extras(advanced_sections, ch_advanced)
+        bas_sorted = _with_extras(basic_sections, ch_basic)
 
         if not adv_sorted and not bas_sorted:
             st.warning(f"{ans_student}의 {ans_chapter_display} 에 인식 가능한 구간이 없습니다.")
@@ -1349,6 +1364,36 @@ if url_teacher == "1":
                 st.toast("변경 사항이 없습니다.")
             else:
                 st.rerun()
+
+        # ── 구간 추가/제거 (Matcha 같은 예외 챕터용) ──
+        st.markdown("---")
+        st.markdown("##### ➕ 구간 추가 (예외 챕터용)")
+        st.caption("Matcha처럼 구간을 5번 이후로 늘려야 하는 챕터에서 사용. 빙고 챕터는 손대지 않으면 영향 없음. 저장 안 한 상태에서 제거하면 입력값은 사라짐.")
+
+        _extras_variants = []
+        if ch_advanced:
+            _extras_variants.append(("심화", ch_advanced))
+        if ch_basic:
+            _extras_variants.append(("기초", ch_basic))
+
+        if _extras_variants:
+            _ex_cols = st.columns(len(_extras_variants))
+            for _ei, (_label, _ch_name) in enumerate(_extras_variants):
+                with _ex_cols[_ei]:
+                    _ex_key = f"extra_sec_{_ch_name}_{ans_student}"
+                    _cur_extra = int(st.session_state.get(_ex_key, 0))
+                    st.markdown(f"**{_label} — {_ch_name}** · 추가된 구간 {_cur_extra}개")
+                    _bc1, _bc2 = st.columns(2)
+                    with _bc1:
+                        if st.button("➕ 구간 추가", key=f"add_{_label}_{_ch_name}_{ans_student}",
+                                     use_container_width=True):
+                            st.session_state[_ex_key] = _cur_extra + 1
+                            st.rerun()
+                    with _bc2:
+                        if st.button("↩️ 마지막 제거", key=f"rm_{_label}_{_ch_name}_{ans_student}",
+                                     disabled=(_cur_extra == 0), use_container_width=True):
+                            st.session_state[_ex_key] = max(0, _cur_extra - 1)
+                            st.rerun()
 
         # ── TTS 생성 트리거 (GitHub Actions) ──
         st.markdown("---")
