@@ -473,11 +473,12 @@ def render_answer_reveal(answer_text, reveal_label="🔒 정답 보기 (꾹 누�
     components.html(html, height=total_h, scrolling=False)
 
 def render_audio_player(audio_abs_path, label="🔊 강세 잡기"):
-    """mp3 파일을 base64 임베드해서 재생 버튼으로 렌더링.
+    """mp3 파일을 base64 임베드해서 [강세 잡기 | ↻ 처음부터] 두 버튼으로 렌더링.
     동작:
-      - 정지 상태에서 누름  → 처음부터 재생
-      - 재생 중 누르고 있음 → 일시정지 (떼면 재개)
-      - 자연 종료 후 다시 누름 → 처음부터 재생
+      - 메인 버튼 정지 상태에서 누름        → 처음부터 재생
+      - 메인 버튼 재생 중 누르고 있음       → 일시정지 (떼면 그 지점부터 재개)
+      - 메인 버튼 자연 종료 후 다시 누름    → 처음부터 재생
+      - ↻ 버튼 클릭                          → 언제든 즉시 처음부터 재생
     """
     try:
         with open(audio_abs_path, "rb") as f:
@@ -494,33 +495,47 @@ def render_audio_player(audio_abs_path, label="🔊 강세 잡기"):
 
     uid = base64.b64encode(os.urandom(6)).decode().replace("/", "_").replace("+", "-").rstrip("=")
     hold_label = "⏸ 떼면 재개"
+    hint_default = "👆 꾹 누르면 일시정지"
+    hint_hold = "계속 누르고 있으세요"
     html = f"""
-    <div style="margin:0;font-family:-apple-system,system-ui,'Noto Sans KR',sans-serif;">
+    <div style="margin:0;font-family:-apple-system,system-ui,'Noto Sans KR',sans-serif;display:flex;gap:6px;align-items:stretch;">
       <audio id="aud_{uid}" src="data:audio/mp3;base64,{audio_b64}" preload="auto"></audio>
       <button id="btn_{uid}"
         data-default="{label}" data-hold="{hold_label}"
-        style="background:#2980B9;color:white;border:none;border-radius:8px;
-               padding:10px 16px;font-size:15px;font-weight:600;cursor:pointer;
-               width:100%;user-select:none;-webkit-user-select:none;
-               -webkit-touch-callout:none;transition:background 0.12s;">
-        {label}
+        data-hint-default="{hint_default}" data-hint-hold="{hint_hold}"
+        style="flex:1;background:#2980B9;color:white;border:none;border-radius:8px;
+               padding:8px 12px;cursor:pointer;text-align:center;
+               user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+               transition:background 0.12s;">
+        <div style="font-size:15px;font-weight:600;line-height:1.15;">{label}</div>
+        <div style="font-size:10.5px;font-weight:400;opacity:0.78;margin-top:3px;line-height:1;">{hint_default}</div>
+      </button>
+      <button id="rst_{uid}"
+        title="처음부터 재생"
+        aria-label="처음부터 재생"
+        style="width:52px;background:#5DADE2;color:white;border:none;border-radius:8px;
+               padding:0;cursor:pointer;font-size:22px;line-height:1;
+               user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+               transition:background 0.12s;">
+        ↻
       </button>
       <script>
         (function(){{
           var aud = document.getElementById('aud_{uid}');
           var btn = document.getElementById('btn_{uid}');
+          var rst = document.getElementById('rst_{uid}');
           var isHolding = false;
           var BG_DEFAULT = '#2980B9';
           var BG_HOLD = '#7F8C8D';
 
-          function resetVisual(){{
-            btn.textContent = btn.dataset.default;
-            btn.style.background = BG_DEFAULT;
+          function paintMain(labelText, hintText, bg){{
+            btn.innerHTML =
+              '<div style="font-size:15px;font-weight:600;line-height:1.15;">' + labelText + '</div>' +
+              '<div style="font-size:10.5px;font-weight:400;opacity:0.78;margin-top:3px;line-height:1;">' + hintText + '</div>';
+            btn.style.background = bg;
           }}
-          function holdVisual(){{
-            btn.textContent = btn.dataset.hold;
-            btn.style.background = BG_HOLD;
-          }}
+          function resetVisual(){{ paintMain(btn.dataset.default, btn.dataset.hintDefault, BG_DEFAULT); }}
+          function holdVisual(){{ paintMain(btn.dataset.hold, btn.dataset.hintHold, BG_HOLD); }}
 
           aud.addEventListener('ended', function(){{
             aud.currentTime = 0;
@@ -530,14 +545,14 @@ def render_audio_player(audio_abs_path, label="🔊 강세 잡기"):
 
           function pressDown(e){{
             if (e && e.cancelable) e.preventDefault();
-            // 정지 상태(처음 or 자연 종료 직후) → 처음부터 재생
             if (aud.paused && (aud.currentTime === 0 || aud.currentTime >= (aud.duration - 0.05))) {{
               aud.currentTime = 0;
+              aud.volume = 1;
               aud.play().catch(function(err){{ console.error(err); }});
               isHolding = false;
               resetVisual();
             }} else if (!aud.paused) {{
-              // 재생 중 → 일시정지 (hold 시작)
+              aud.volume = 0;  // 체감 응답 빠르게
               aud.pause();
               isHolding = true;
               holdVisual();
@@ -547,8 +562,18 @@ def render_audio_player(audio_abs_path, label="🔊 강세 잡기"):
           function pressUp(e){{
             if (e && e.cancelable) e.preventDefault();
             if (isHolding && aud.paused) {{
+              aud.volume = 1;
               aud.play().catch(function(err){{ console.error(err); }});
             }}
+            isHolding = false;
+            resetVisual();
+          }}
+
+          function restart(e){{
+            if (e && e.cancelable) e.preventDefault();
+            aud.currentTime = 0;
+            aud.volume = 1;
+            aud.play().catch(function(err){{ console.error(err); }});
             isHolding = false;
             resetVisual();
           }}
@@ -560,11 +585,14 @@ def render_audio_player(audio_abs_path, label="🔊 강세 잡기"):
           btn.addEventListener('touchend', pressUp, {{passive:false}});
           btn.addEventListener('touchcancel', pressUp, {{passive:false}});
           btn.addEventListener('contextmenu', function(e){{ e.preventDefault(); }});
+
+          rst.addEventListener('click', restart);
+          rst.addEventListener('contextmenu', function(e){{ e.preventDefault(); }});
         }})();
       </script>
     </div>
     """
-    components.html(html, height=60, scrolling=False)
+    components.html(html, height=68, scrolling=False)
 
 
 def render_match_picker(image_path, image_student, chapter, all_students, image_matchings, client, key_suffix=""):
