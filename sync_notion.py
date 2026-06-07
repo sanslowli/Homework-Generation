@@ -58,6 +58,10 @@ RATE_LIMIT_DELAY = 0.34        # 노션 API 3 req/sec 안전선
 # 제목 패턴: "603@박대호", "603S@박대호" 등
 TITLE_PATTERN = re.compile(r"^(\d+S?)@(.+)$")
 
+# 점수 메모 찌꺼기 패턴: ": 80", "소서연: 80", "Untitled: 80", "박대호 : 90" 등
+# 줄 전체가 [이름(선택)] + 콜론 + 숫자 형태일 때만 매칭
+SCORE_STAMP_PATTERN = re.compile(r"^\s*[\w가-힣\s]*:\s*\d{1,4}\s*$")
+
 
 # ─── 로깅 ───
 logging.basicConfig(
@@ -150,9 +154,16 @@ def clean_rich_text(rich_text: list) -> str:
     # 승인 마커 제거 (콘텐츠가 아니라 메타정보)
     for marker in ("✅", "☑️", "✔️"):
         out = out.replace(marker, "")
-    # 빈 줄/공백 정리
-    lines = [ln.strip() for ln in out.splitlines()]
-    return "\n".join(ln for ln in lines if ln).strip()
+    # 빈 줄 + 점수 메모 찌꺼기 줄 제거 (예: ": 80", "소서연: 80")
+    lines = []
+    for ln in out.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        if SCORE_STAMP_PATTERN.match(ln):
+            continue
+        lines.append(ln)
+    return "\n".join(lines).strip()
 
 
 def has_approval_marker(rich_text: list) -> bool:
