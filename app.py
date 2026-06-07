@@ -473,12 +473,14 @@ def render_answer_reveal(answer_text, reveal_label="🔒 정답 보기 (꾹 누�
     components.html(html, height=total_h, scrolling=False)
 
 def render_audio_player(audio_abs_path, label="🔊 강세 잡기"):
-    """mp3 파일을 base64 임베드해서 [강세 잡기 | ↻ 처음부터] 두 버튼으로 렌더링.
-    동작:
-      - 메인 버튼 정지 상태에서 누름        → 처음부터 재생
-      - 메인 버튼 재생 중 누르고 있음       → 일시정지 (떼면 그 지점부터 재개)
-      - 메인 버튼 자연 종료 후 다시 누름    → 처음부터 재생
-      - ↻ 버튼 클릭                          → 언제든 즉시 처음부터 재생
+    """녹음 락 + 강세 잡기 + 처음부터 위젯.
+    흐름:
+      [🎤 녹음 시작] → [⏺ 녹음 중 (탭=정지)] → [▶ 내 녹음 듣기 | 🎤 다시]
+      녹음 완료 시점에 강세 잡기 버튼이 활성화됨.
+    녹음 데이터:
+      - MediaRecorder API (브라우저 표준)
+      - Blob URL 로 메모리에만 존재, 페이지 이동/새로고침 시 자동 폐기
+      - 서버로 전송 없음
     """
     try:
         with open(audio_abs_path, "rb") as f:
@@ -497,69 +499,124 @@ def render_audio_player(audio_abs_path, label="🔊 강세 잡기"):
     hold_label = "⏸ 떼면 재개"
     hint_default = "👆 꾹 누르면 일시정지"
     hint_hold = "계속 누르고 있으세요"
+    locked_label = "🔒 정답 듣기"
+    locked_hint = "먼저 내 목소리를 녹음하세요"
+
     html = f"""
-    <div style="margin:0;font-family:-apple-system,system-ui,'Noto Sans KR',sans-serif;display:flex;gap:6px;align-items:stretch;">
+    <div style="margin:0;font-family:-apple-system,system-ui,'Noto Sans KR',sans-serif;">
+      <!-- 정답 mp3 (선생님이 만들어둔 강세 음원) -->
       <audio id="aud_{uid}" src="data:audio/mp3;base64,{audio_b64}" preload="auto"></audio>
-      <button id="btn_{uid}"
-        data-default="{label}" data-hold="{hold_label}"
-        data-hint-default="{hint_default}" data-hint-hold="{hint_hold}"
-        style="flex:1;background:#2980B9;color:white;border:none;border-radius:8px;
-               padding:8px 12px;cursor:pointer;text-align:center;
-               user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
-               transition:background 0.12s;">
-        <div style="font-size:15px;font-weight:600;line-height:1.15;">{label}</div>
-        <div style="font-size:10.5px;font-weight:400;opacity:0.78;margin-top:3px;line-height:1;">{hint_default}</div>
-      </button>
-      <button id="rst_{uid}"
-        title="처음부터 재생"
-        aria-label="처음부터 재생"
-        style="width:52px;background:#5DADE2;color:white;border:none;border-radius:8px;
-               padding:0;cursor:pointer;font-size:22px;line-height:1;
-               user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
-               transition:background 0.12s;">
-        ↻
-      </button>
+      <!-- 학생 녹음 (Blob URL로 in-memory) -->
+      <audio id="myaud_{uid}"></audio>
+
+      <!-- 1단: 녹음 컨트롤 (state-based innerHTML 교체) -->
+      <div id="recBar_{uid}" style="margin-bottom:6px;">
+        <button id="recBtn_{uid}"
+          style="width:100%;background:#E74C3C;color:white;border:none;border-radius:8px;
+                 padding:10px 14px;font-size:15px;font-weight:600;cursor:pointer;
+                 user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+                 transition:background 0.12s;">
+          🎤 녹음 시작
+        </button>
+      </div>
+
+      <!-- 2단: 정답 듣기 (초기 lock 상태) -->
+      <div style="display:flex;gap:6px;align-items:stretch;">
+        <button id="btn_{uid}" disabled
+          data-default="{label}" data-hold="{hold_label}"
+          data-hint-default="{hint_default}" data-hint-hold="{hint_hold}"
+          data-locked="{locked_label}" data-locked-hint="{locked_hint}"
+          style="flex:1;background:#BDC3C7;color:white;border:none;border-radius:8px;
+                 padding:8px 12px;cursor:not-allowed;text-align:center;opacity:0.75;
+                 user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+                 transition:background 0.12s, opacity 0.12s;">
+          <div style="font-size:15px;font-weight:600;line-height:1.15;">{locked_label}</div>
+          <div style="font-size:10.5px;font-weight:400;opacity:0.9;margin-top:3px;line-height:1;">{locked_hint}</div>
+        </button>
+        <button id="rst_{uid}" disabled
+          title="처음부터 재생" aria-label="처음부터 재생"
+          style="width:52px;background:#BDC3C7;color:white;border:none;border-radius:8px;
+                 padding:0;cursor:not-allowed;font-size:22px;line-height:1;opacity:0.75;
+                 user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+                 transition:background 0.12s, opacity 0.12s;">
+          ↻
+        </button>
+      </div>
+
       <script>
         (function(){{
           var aud = document.getElementById('aud_{uid}');
+          var myAud = document.getElementById('myaud_{uid}');
+          var recBar = document.getElementById('recBar_{uid}');
           var btn = document.getElementById('btn_{uid}');
           var rst = document.getElementById('rst_{uid}');
+
+          // ══════════ 정답 듣기 (강세 잡기) ══════════
           var isHolding = false;
           var BG_DEFAULT = '#2980B9';
           var BG_HOLD = '#7F8C8D';
+          var BG_LOCKED = '#BDC3C7';
+          var BG_RST_ACTIVE = '#5DADE2';
 
           function paintMain(labelText, hintText, bg){{
             btn.innerHTML =
               '<div style="font-size:15px;font-weight:600;line-height:1.15;">' + labelText + '</div>' +
-              '<div style="font-size:10.5px;font-weight:400;opacity:0.78;margin-top:3px;line-height:1;">' + hintText + '</div>';
+              '<div style="font-size:10.5px;font-weight:400;opacity:0.85;margin-top:3px;line-height:1;">' + hintText + '</div>';
             btn.style.background = bg;
           }}
           function resetVisual(){{ paintMain(btn.dataset.default, btn.dataset.hintDefault, BG_DEFAULT); }}
           function holdVisual(){{ paintMain(btn.dataset.hold, btn.dataset.hintHold, BG_HOLD); }}
+          function lockedVisual(){{ paintMain(btn.dataset.locked, btn.dataset.lockedHint, BG_LOCKED); }}
+
+          function unlockAnswer(){{
+            btn.disabled = false;
+            btn.style.cursor = 'pointer';
+            btn.style.opacity = '1';
+            rst.disabled = false;
+            rst.style.cursor = 'pointer';
+            rst.style.opacity = '1';
+            rst.style.background = BG_RST_ACTIVE;
+            resetVisual();
+          }}
+          function lockAnswer(){{
+            if (!aud.paused) aud.pause();
+            aud.currentTime = 0;
+            btn.disabled = true;
+            btn.style.cursor = 'not-allowed';
+            btn.style.opacity = '0.75';
+            rst.disabled = true;
+            rst.style.cursor = 'not-allowed';
+            rst.style.opacity = '0.75';
+            rst.style.background = BG_LOCKED;
+            isHolding = false;
+            lockedVisual();
+          }}
 
           aud.addEventListener('ended', function(){{
             aud.currentTime = 0;
             isHolding = false;
-            resetVisual();
+            if (!btn.disabled) resetVisual();
           }});
 
           function pressDown(e){{
+            if (btn.disabled) return;
             if (e && e.cancelable) e.preventDefault();
             if (aud.paused && (aud.currentTime === 0 || aud.currentTime >= (aud.duration - 0.05))) {{
+              if (!myAud.paused) myAud.pause();  // 내 녹음 재생 중이면 정지
               aud.currentTime = 0;
               aud.volume = 1;
               aud.play().catch(function(err){{ console.error(err); }});
               isHolding = false;
               resetVisual();
             }} else if (!aud.paused) {{
-              aud.volume = 0;  // 체감 응답 빠르게
+              aud.volume = 0;
               aud.pause();
               isHolding = true;
               holdVisual();
             }}
           }}
-
           function pressUp(e){{
+            if (btn.disabled) return;
             if (e && e.cancelable) e.preventDefault();
             if (isHolding && aud.paused) {{
               aud.volume = 1;
@@ -568,16 +625,16 @@ def render_audio_player(audio_abs_path, label="🔊 강세 잡기"):
             isHolding = false;
             resetVisual();
           }}
-
           function restart(e){{
+            if (rst.disabled) return;
             if (e && e.cancelable) e.preventDefault();
+            if (!myAud.paused) myAud.pause();
             aud.currentTime = 0;
             aud.volume = 1;
             aud.play().catch(function(err){{ console.error(err); }});
             isHolding = false;
             resetVisual();
           }}
-
           btn.addEventListener('mousedown', pressDown);
           btn.addEventListener('mouseup', pressUp);
           btn.addEventListener('mouseleave', pressUp);
@@ -585,14 +642,150 @@ def render_audio_player(audio_abs_path, label="🔊 강세 잡기"):
           btn.addEventListener('touchend', pressUp, {{passive:false}});
           btn.addEventListener('touchcancel', pressUp, {{passive:false}});
           btn.addEventListener('contextmenu', function(e){{ e.preventDefault(); }});
-
           rst.addEventListener('click', restart);
           rst.addEventListener('contextmenu', function(e){{ e.preventDefault(); }});
+
+          // ══════════ 녹음 ══════════
+          var mediaRecorder = null;
+          var audioChunks = [];
+          var myRecordingUrl = null;
+          var recordingStartTime = 0;
+          var recordingTimer = null;
+          var micStream = null;
+
+          function setIdleState(){{
+            recBar.innerHTML =
+              '<button id="recBtn_{uid}" ' +
+              'style="width:100%;background:#E74C3C;color:white;border:none;border-radius:8px;' +
+              'padding:10px 14px;font-size:15px;font-weight:600;cursor:pointer;' +
+              'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;' +
+              'transition:background 0.12s;">🎤 녹음 시작</button>';
+            document.getElementById('recBtn_{uid}').addEventListener('click', startRecording);
+            lockAnswer();
+          }}
+          function setRecordingState(){{
+            recBar.innerHTML =
+              '<button id="recBtn_{uid}" ' +
+              'style="width:100%;background:#922B21;color:white;border:none;border-radius:8px;' +
+              'padding:9px 14px;font-size:15px;font-weight:600;cursor:pointer;text-align:center;' +
+              'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;' +
+              'animation:pulse_{uid} 1.2s ease-in-out infinite;">' +
+              '<div>⏺ 녹음 중 · <span class="timer" style="font-variant-numeric:tabular-nums;">0:00</span></div>' +
+              '<div style="font-size:10.5px;font-weight:400;opacity:0.85;margin-top:2px;line-height:1;">탭하면 정지</div>' +
+              '</button>';
+            document.getElementById('recBtn_{uid}').addEventListener('click', stopRecording);
+            lockAnswer();
+          }}
+          function setRecordedState(){{
+            recBar.innerHTML =
+              '<div style="display:flex;gap:6px;">' +
+              '<button id="playMine_{uid}" ' +
+              'style="flex:1;background:#16A085;color:white;border:none;border-radius:8px;' +
+              'padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer;' +
+              'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;">' +
+              '<span id="playMineLbl_{uid}">▶ 내 녹음 듣기</span>' +
+              '</button>' +
+              '<button id="reRec_{uid}" ' +
+              'style="width:100px;background:#E67E22;color:white;border:none;border-radius:8px;' +
+              'padding:10px 6px;font-size:13px;font-weight:600;cursor:pointer;' +
+              'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;">🎤 다시 녹음</button>' +
+              '</div>';
+            document.getElementById('playMine_{uid}').addEventListener('click', togglePlayMine);
+            document.getElementById('reRec_{uid}').addEventListener('click', startRecording);
+            unlockAnswer();
+          }}
+
+          async function startRecording(){{
+            try {{
+              // 진행 중인 재생 모두 멈춤
+              if (!aud.paused) aud.pause();
+              if (!myAud.paused) myAud.pause();
+
+              micStream = await navigator.mediaDevices.getUserMedia({{audio: true}});
+              mediaRecorder = new MediaRecorder(micStream);
+              audioChunks = [];
+              mediaRecorder.ondataavailable = function(e){{
+                if (e.data.size > 0) audioChunks.push(e.data);
+              }};
+              mediaRecorder.onstop = function(){{
+                var blob = new Blob(audioChunks, {{type: mediaRecorder.mimeType || 'audio/webm'}});
+                if (myRecordingUrl) URL.revokeObjectURL(myRecordingUrl);
+                myRecordingUrl = URL.createObjectURL(blob);
+                myAud.src = myRecordingUrl;
+                if (micStream){{
+                  micStream.getTracks().forEach(function(t){{ t.stop(); }});
+                  micStream = null;
+                }}
+                stopTimer();
+                setRecordedState();
+              }};
+              mediaRecorder.start();
+              recordingStartTime = Date.now();
+              setRecordingState();
+              startTimer();
+            }} catch (err){{
+              console.error('Mic access error:', err);
+              alert('마이크 권한이 필요합니다. 브라우저 주소창 옆 자물쇠 → 마이크 허용으로 설정해 주세요.');
+            }}
+          }}
+          function stopRecording(){{
+            if (mediaRecorder && mediaRecorder.state === 'recording'){{
+              mediaRecorder.stop();
+            }}
+          }}
+          function startTimer(){{
+            recordingTimer = setInterval(function(){{
+              var elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+              var mins = Math.floor(elapsed / 60);
+              var secs = elapsed % 60;
+              var el = document.querySelector('#recBtn_{uid} .timer');
+              if (el) el.textContent = mins + ':' + (secs < 10 ? '0' + secs : secs);
+            }}, 250);
+          }}
+          function stopTimer(){{
+            if (recordingTimer){{
+              clearInterval(recordingTimer);
+              recordingTimer = null;
+            }}
+          }}
+
+          function togglePlayMine(){{
+            var lbl = document.getElementById('playMineLbl_{uid}');
+            if (myAud.paused){{
+              if (!aud.paused) aud.pause();  // 정답 재생 중이면 멈춤
+              myAud.currentTime = 0;
+              myAud.play().catch(function(err){{ console.error(err); }});
+              if (lbl) lbl.textContent = '■ 정지';
+            }} else {{
+              myAud.pause();
+              if (lbl) lbl.textContent = '▶ 내 녹음 듣기';
+            }}
+          }}
+          myAud.addEventListener('ended', function(){{
+            var lbl = document.getElementById('playMineLbl_{uid}');
+            if (lbl) lbl.textContent = '▶ 내 녹음 듣기';
+          }});
+
+          // 페이지 떠날 때 마지막 정리 (확정적 폐기)
+          window.addEventListener('beforeunload', function(){{
+            if (myRecordingUrl) URL.revokeObjectURL(myRecordingUrl);
+            if (micStream) micStream.getTracks().forEach(function(t){{ t.stop(); }});
+          }});
+
+          // 초기 바인딩 (idle 상태로 시작)
+          document.getElementById('recBtn_{uid}').addEventListener('click', startRecording);
         }})();
       </script>
+
+      <style>
+        @keyframes pulse_{uid} {{
+          0%, 100% {{ box-shadow: 0 0 0 0 rgba(231,76,60,0.5); }}
+          50%      {{ box-shadow: 0 0 0 6px rgba(231,76,60,0); }}
+        }}
+      </style>
     </div>
     """
-    components.html(html, height=68, scrolling=False)
+    components.html(html, height=132, scrolling=False)
 
 
 def render_match_picker(image_path, image_student, chapter, all_students, image_matchings, client, key_suffix=""):
