@@ -118,25 +118,54 @@ def extract_title(page: dict) -> str:
 
 
 def clean_rich_text(rich_text: list) -> str:
-    """rich_text 배열에서 회색·취소선 제거하고 깨끗한 텍스트 반환.
+    """rich_text 배열에서 비-콘텐츠 요소 제거하고 깨끗한 텍스트 반환.
 
-    노션 회색 글씨 = 첨삭 주석 → 제외.
-    취소선 = 학생 원본 중 선생님이 그어버린 부분 → 제외.
+    제외 대상:
+      - mention 타입 (페이지/사용자/날짜 멘션 → "Untitled : 80" 같은 찌꺼기 방지)
+      - equation 타입
+      - 회색 글씨 (첨삭 주석)
+      - 배경색 글씨 (심화/기초/통합 같은 라벨 태그)
+      - 취소선 (학생 원본 중 선생님이 그어버린 부분)
+      - ✅ / ☑️ 마커 (승인 표시지 콘텐츠 아님)
     """
     parts = []
     for item in rich_text:
+        # text 타입만 처리. mention/equation 등은 모두 제외.
+        if item.get("type") != "text":
+            continue
         ann = item.get("annotations", {})
-        if ann.get("color") == "gray":
+        color = ann.get("color", "default")
+        # 회색 글씨 = 첨삭 주석
+        if color == "gray":
+            continue
+        # 배경색 = 라벨 태그 (심화·기초·통합 등)
+        if color.endswith("_background"):
             continue
         if ann.get("strikethrough"):
             continue
         text = item.get("plain_text") or item.get("text", {}).get("content", "")
         if text:
             parts.append(text)
-    out = "".join(parts).strip()
-    # 빈 줄 정리
-    lines = [ln.rstrip() for ln in out.splitlines()]
-    return "\n".join(ln for ln in lines if ln)
+    out = "".join(parts)
+    # 승인 마커 제거 (콘텐츠가 아니라 메타정보)
+    for marker in ("✅", "☑️", "✔️"):
+        out = out.replace(marker, "")
+    # 빈 줄/공백 정리
+    lines = [ln.strip() for ln in out.splitlines()]
+    return "\n".join(ln for ln in lines if ln).strip()
+
+
+def has_approval_marker(rich_text: list) -> bool:
+    """셀 안에 ✅/☑️/✔️ 같은 승인 마커가 있는지.
+
+    승인 마커 없는 셀 = 아직 미완성(템플릿 단계, S+V 같은 변수가 그대로 남아있음)
+    → SentenceBank에 반영하지 않음.
+    """
+    for item in rich_text:
+        text = item.get("plain_text", "")
+        if "✅" in text or "☑️" in text or "✔️" in text:
+            return True
+    return False
 
 
 # ─── 챕터 매핑 빌드 ───
@@ -208,6 +237,9 @@ def extract_sentences(sentence_pages: list, chapter_mapping: dict) -> list:
             if not prop:
                 continue
             rich = prop.get("rich_text", [])
+            # ✅ 등 승인 마커가 없으면 미완성/템플릿으로 간주 → skip
+            if not has_approval_marker(rich):
+                continue
             sentence = clean_rich_text(rich)
             if not sentence:
                 continue
