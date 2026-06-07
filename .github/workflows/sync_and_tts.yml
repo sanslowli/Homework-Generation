@@ -1,0 +1,131 @@
+name: Sync Notion + Generate TTS
+
+# 통합 워크플로우: 노션 → SentenceBank 동기화 + 변경된 행만 TTS 재생성 + 자동 커밋
+#
+# 실행 방법:
+#   1. 노션 버튼 → webhook (가장 일반적)
+#   2. GitHub 레포 → Actions → 이 워크플로우 → Run workflow (수동)
+#   3. 매일 KST 04:30 자동 (안전망)
+#
+# 작업 순서:
+#   1) sync_notion.py 실행 → SentenceBank 시트 최신화
+#   2) generate_tts.py 실행 → 사이드카 비교로 변경된 문장만 mp3 재생성
+#   3) 새로 생성된 mp3 + .txt 자동 커밋·푸시
+#
+# 변경 없으면 mp3 안 만들고 시트만 갱신, 즉 매번 돌려도 안전·저비용.
+
+on:
+  workflow_dispatch:           # 노션 버튼 + 수동
+    inputs:
+      chapter:
+        description: '특정 챕터만 (예: 603). 비워두면 전체.'
+        required: false
+        default: ''
+      force_tts:
+        description: 'TTS 강제 재생성 (내용 같아도 굽기)'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: '30 19 * * *'      # 매일 UTC 19:30 = KST 04:30 (안전망, sync_notion.yml의 04:00 뒤)
+
+permissions:
+  contents: write              # mp3·txt 커밋·푸시 필요
+
+# 동시 실행 방지 (sync_notion.yml과도 그룹 공유 → 양쪽 동시 안 돎)
+concurrency:
+  group: notion-and-tts
+  cancel-in-progress: false
+
+jobs:
+  sync_and_tts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install requests gspread oauth2client openai
+
+      - name: Write service account key
+        env:
+          GCP_SERVICE_KEY_JSON: ${{ secrets.GCP_SERVICE_KEY_JSON }}
+        run: |
+          printf '%s' "$GCP_SERVICE_KEY_JSON" > service_key.json
+
+      - name: Write OpenAI key file
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          printf '%s' "$OPENAI_API_KEY" > openai_key.txt
+
+      # ─── 1단계: 노션 → SentenceBank 동기화 ───
+      - name: 🔄 Sync Notion to SentenceBank
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        run: python sync_notion.py
+
+      # ─── 2단계: SentenceBank → TTS mp3 생성 ───
+      - name: 🎙️ Generate TTS audio
+        run: |
+          ARGS="--yes"
+          if [ -n "${{ inputs.chapter }}" ]; then
+            ARGS="$ARGS --chapter ${{ inputs.chapter }}"
+          fi
+          if [ "${{ inputs.force_tts }}" = "true" ]; then
+            ARGS="$ARGS --force"
+          fi
+          python generate_tts.py $ARGS
+
+      - name: Clean up secret files
+        if: always()
+        run: |
+          rm -f service_key.json openai_key.txt
+
+      # ─── 3단계: 새 mp3·txt 자동 커밋·푸시 ───
+      - name: Check for new audio files
+        id: check_audio
+        run: |
+          if [ -n "$(git status --porcelain audio/)" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push audio files
+        if: steps.check_audio.outputs.has_changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add audio/
+          git commit -m "🎙️ Sync + TTS update (auto-generated)"
+
+          # 푸시 충돌 자동 처리: 최대 3회 재시도
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push; then
+              echo "✅ Push succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "⚠️ Push attempt $attempt failed. Retrying in 5s..."
+            sleep 5
+          done
+          echo "❌ Push failed after 3 attempts"
+          exit 1
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.check_audio.outputs.has_changes }}" = "true" ]; then
+            echo "✅ 시트 동기화 + 변경된 문장 mp3 재생성 + 커밋 완료"
+          else
+            echo "ℹ️ 시트 동기화 완료. 새로 만들거나 변경된 mp3 없음."
+          fi
