@@ -32,9 +32,9 @@ on:
 permissions:
   contents: write              # mp3·txt 커밋·푸시 필요
 
-# 동시 실행 방지 (sync_notion.yml과도 그룹 공유 → 양쪽 동시 안 돎)
+# 셋 다 같은 그룹(homework-pipeline)으로 묶어서 어떤 조합도 동시 실행 안 됨
 concurrency:
-  group: notion-and-tts
+  group: homework-pipeline
   cancel-in-progress: false
 
 jobs:

@@ -19,7 +19,7 @@ permissions:
 
 # 동시에 여러 번 트리거되어도 한 번에 하나만
 concurrency:
-  group: notion-sync
+  group: homework-pipeline  # generate_tts.yml / sync_and_tts.yml과 공유 — 셋 다 동시 실행 방지
   cancel-in-progress: false
 
 jobs:
