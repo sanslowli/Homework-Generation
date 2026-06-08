@@ -1024,39 +1024,6 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
         var recStart = 0;
         var activeAudio = null;
         var playQueue = [];
-        var warmingLoops = {{}};  // {{slot: true}} — vol=0 로 loop 중인 슬롯
-
-        function startWarming(slot) {{
-          // 정답 오디오를 무음 루프로 돌려 오디오 출력 디바이스가 슬립 못 가게 함
-          // (Mac 브라우저: 마이크 정지 후 첫 재생 시 출력 디바이스 전환 ~0.3~4초 mute 회피)
-          var a = $('aud_answer_' + slot + '_' + UID);
-          if (!a || !a.src) return;
-          try {{
-            a.volume = 0;
-            a.loop = true;
-            var pr = a.play();
-            if (pr && pr.then) {{
-              pr.then(function(){{ warmingLoops[slot] = true; }}).catch(function(){{
-                a.volume = 1; a.loop = false;
-              }});
-            }} else {{
-              warmingLoops[slot] = true;
-            }}
-          }} catch(e) {{
-            a.volume = 1; a.loop = false;
-          }}
-        }}
-        function stopAllWarming() {{
-          Object.keys(warmingLoops).forEach(function(slot){{
-            var a = $('aud_answer_' + slot + '_' + UID);
-            if (a) {{
-              a.loop = false;
-              try {{ a.pause(); a.currentTime = 0; }} catch(e){{}}
-              a.volume = 1;
-            }}
-          }});
-          warmingLoops = {{}};
-        }}
 
         function $(id) {{ return document.getElementById(id); }}
 
@@ -1185,6 +1152,15 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
                 unlockPlay(slot);
                 updatePlayAll();
                 currentRecSlot = null;
+                // 자동 재생 플래그가 세팅돼있으면, 방금 저장된 내 녹음 자동 재생
+                if (autoPlayAfterStop) {{
+                  autoPlayAfterStop = false;
+                  setTimeout(function(){{
+                    stopAllPlayback();
+                    playQueue = [{{kind:'mine', slot: slot}}];
+                    playNext();
+                  }}, 80);
+                }}
               }}
               if (ansAudio && ansAudio.src) {{
                 try {{
@@ -1239,26 +1215,69 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           }}
         }}
 
-        // 빨간 버튼 클릭 핸들러
-        //   - 빈 슬롯: 녹음 시작
-        //   - 녹음 중인 슬롯: 정지 (녹음 저장 → 파랑 unlock)
-        //   - 이미 녹음된 슬롯: 내 녹음 재생
+        // 빨간 버튼 — Hold-to-record + 떼면 자동 재생
+        //   - 꾹 누름 (>= 300ms): 녹음 시작 → 떼면 정지 + 자동 재생
+        //   - 짧게 탭 (< 300ms): 이미 녹음된 슬롯이면 내 녹음 재생, 빈 슬롯이면 no-op
+        var TAP_HOLD_MS = 300;
+        var pressTimer = null;
+        var pressedSlot = null;
+        var autoPlayAfterStop = false;
+
+        function onPressStart(slot, e){{
+          if (e && e.cancelable) e.preventDefault();
+          if (isRecording) return;  // 이미 녹음 중인 케이스는 무시 (release 가 처리)
+          pressedSlot = slot;
+          pressTimer = setTimeout(function(){{
+            pressTimer = null;
+            if (pressedSlot === slot) {{
+              // 임계 이상 hold → 녹음 시작
+              startRecording(slot);
+            }}
+          }}, TAP_HOLD_MS);
+        }}
+
+        function onPressEnd(slot, e){{
+          if (e && e.cancelable) e.preventDefault();
+          if (pressTimer) {{
+            // 임계 전 release → tap 동작
+            clearTimeout(pressTimer);
+            pressTimer = null;
+            pressedSlot = null;
+            if (recordings[slot]) {{
+              // 녹음된 슬롯 탭 → 내 녹음 재생
+              stopAllPlayback();
+              playQueue = [{{kind:'mine', slot: slot}}];
+              playNext();
+            }}
+            // 빈 슬롯 탭 → no-op
+            return;
+          }}
+          // 임계 이후 release → 녹음 중이면 정지 + 자동재생 플래그 세팅
+          if (isRecording && currentRecSlot === slot) {{
+            autoPlayAfterStop = true;
+            pressedSlot = null;
+            stopRecording();
+          }} else {{
+            pressedSlot = null;
+          }}
+        }}
+
         PANES.forEach(function(p){{
           if (!p.ready) return;
           var btn = $('rec_btn_' + p.slot + '_' + UID);
           if (!btn) return;
-          btn.addEventListener('click', function(){{
-            if (isRecording && currentRecSlot === p.slot) {{
-              stopRecording();
-            }} else if (recordings[p.slot]) {{
-              // 이미 녹음된 슬롯 → 내 녹음 재생
-              stopAllPlayback();
-              playQueue = [{{kind:'mine', slot:p.slot}}];
-              playNext();
-            }} else {{
-              startRecording(p.slot);
+          btn.addEventListener('mousedown', function(e){{ onPressStart(p.slot, e); }});
+          btn.addEventListener('mouseup', function(e){{ onPressEnd(p.slot, e); }});
+          btn.addEventListener('mouseleave', function(e){{
+            // 누른 채 버튼 밖으로 나가면 release 와 동일하게 처리
+            if (pressedSlot === p.slot || (isRecording && currentRecSlot === p.slot)) {{
+              onPressEnd(p.slot, e);
             }}
           }});
+          btn.addEventListener('touchstart', function(e){{ onPressStart(p.slot, e); }}, {{passive:false}});
+          btn.addEventListener('touchend', function(e){{ onPressEnd(p.slot, e); }}, {{passive:false}});
+          btn.addEventListener('touchcancel', function(e){{ onPressEnd(p.slot, e); }}, {{passive:false}});
+          btn.addEventListener('contextmenu', function(e){{ e.preventDefault(); }});
         }});
 
         // 파란 버튼 클릭: 정답 mp3 만 재생 (내 녹음 X)
@@ -2574,6 +2593,33 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
             st.session_state['chapter_mapping'],
             st.session_state['image_matchings'],
         )
+
+        # ── 활성 그림칸(음원 있는 칸) 수 계산 — 통과/미통과 안내 표시용 ──
+        _active_pane_count = 0
+        _cur_section_str, _ = extract_section_slot_from_filename(os.path.basename(current_img_path))
+        if _cur_section_str:
+            _panes_in_sec = st.session_state.get('chapter_mapping', {}).get(
+                (str(current_chapter), _cur_section_str), []
+            )
+            _img_match_key = (st.session_state['student_name'], str(current_chapter),
+                              os.path.basename(current_img_path))
+            _owner_for_image = st.session_state.get('image_matchings', {}).get(_img_match_key)
+            if _owner_for_image and _panes_in_sec:
+                for _pn in _panes_in_sec:
+                    _mp3 = get_audio_path_pane(str(current_chapter), _pn, _owner_for_image)
+                    if os.path.exists(_mp3):
+                        _active_pane_count += 1
+
+        # 활성 그림칸이 있으면 안내 표시 (녹음 후 진행 유도). 0개면 안내 없이 바로 진행 가능.
+        if _active_pane_count > 0:
+            st.markdown(
+                '<div style="background:#FEF3E2;border-left:4px solid #E67E22;padding:10px 14px;'
+                'border-radius:6px;font-size:14px;color:#7E4A0E;margin:8px 0 12px 0;'
+                'font-family:-apple-system,system-ui,sans-serif;">'
+                f'🎙️ 빨간 버튼 <b>꾹 눌러서 떼기</b>로 그림칸 {_active_pane_count}개 모두 녹음한 후 진행해주세요.'
+                '</div>',
+                unsafe_allow_html=True
+            )
 
         # ── 통과/미통과 (그리드 하단) — 파일 단위(=한 학생의 한 구간) 마킹 + 한 칸 진행 ──
         col1, col2 = st.columns(2)
