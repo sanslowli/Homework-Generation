@@ -41,6 +41,8 @@ st.markdown("""
 BASE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 TARGET_FOLDERS = ["Syntax Pitching", "Syntax Only", "Syntax + Open-ended Question"]
 ALLOWED_SUBFOLDERS = ["현행 챕터", "지난 챕터"]
+# 매칭 드롭다운 후보 수집용 — 보류/보관 학생도 포함 (수업 잠시 쉬는 중인 학생의 그림도 매칭 가능)
+MATCHING_SUBFOLDERS = ["현행 챕터", "지난 챕터", "보류", "보관", "보관 폴더"]
 SHEET_NAME = "Syntax Pitching DB"
 FONT_PATH = os.path.join(BASE_FOLDER, "font.ttf")
 
@@ -874,6 +876,372 @@ def render_audio_player(audio_abs_path, label="🔊 강세 잡기"):
     components.html(html, height=132, scrolling=False)
 
 
+def render_section_audio_grid(current_image_path, image_student, chapter, sentence_bank, chapter_mapping, image_matchings):
+    """구간 단위 멀티 그림칸 녹음·재생 그리드 위젯 (계산기 스타일).
+
+    [레이아웃]
+        Row 1 (빨강): [녹음 1] [녹음 2] [녹음 3] [녹음 4] | [🎤 다시]
+        Row 2 (파랑): [정답 1] [정답 2] [정답 3] [정답 4] | [🔊 전체 듣기]
+
+    [동작]
+    - 빨강 N: 그림칸 N의 학생 녹음 (탭=시작/정지)
+    - 파랑 N: 그림칸 N 의 [내 녹음 → 정답] 시퀀스 재생 (녹음 후 unlock)
+    - 다시: 모든 녹음 초기화 + 파랑 버튼 전부 lock
+    - 전체 듣기: 녹음된 모든 칸 [내 녹음 1→2→…→N] → [정답 1→2→…→N] 순차 재생
+    - 어떤 듣기 버튼이든 누르면 직전 재생 즉시 중단 후 새로 시작
+    - 매칭 안된/음원 없는 칸: 회색으로 잠금. 구간보다 적은 그림칸은 회색.
+    - 매칭/녹음 상태 그대로 페이지 이동 시 휘발 (서버 전송 0).
+    """
+    image_filename = os.path.basename(current_image_path)
+    section, _ = extract_section_slot_from_filename(image_filename)
+    if section is None:
+        return
+
+    chapter_str = str(chapter)
+    panes = chapter_mapping.get((chapter_str, section))
+    if not panes:
+        st.warning(f"⚠️ 챕터 {chapter_str} 구간 {section} 매핑이 빙고판 DB에 없습니다.")
+        return
+
+    # 한 파일 = 한 학생의 한 구간 답안 전체.
+    # 화면에 표시된 그 파일의 owner 가, 이 구간 전체 panes 의 owner.
+    matched_owner = image_matchings.get((image_student, chapter_str, image_filename))
+
+    # pane 번호 낮은 순으로 정렬된 panes 를 버튼 1, 2, 3, ... 에 순차 배정.
+    # owner 의 mp3 가 있는 pane 만 활성화, 없으면 잠금.
+    pane_infos = []
+    for slot_idx, pane in enumerate(sorted(panes), start=1):
+        audio_b64 = None
+        if matched_owner:
+            mp3_path = get_audio_path_pane(chapter_str, pane, matched_owner)
+            if os.path.exists(mp3_path):
+                try:
+                    with open(mp3_path, "rb") as f:
+                        audio_b64 = base64.b64encode(f.read()).decode()
+                except Exception:
+                    pass
+        pane_infos.append({
+            "slot": slot_idx,
+            "pane": pane,
+            "ready": bool(audio_b64),
+            "audio_b64": audio_b64,
+        })
+
+    # 그리드 컬럼: 최소 4 + 실제 패네 수가 더 많으면 그만큼 확장
+    n_pane_cols = max(4, len(pane_infos))
+    n_total_cols = n_pane_cols + 1  # +1 = 특수 버튼 컬럼
+
+    # JS 에 넘길 데이터
+    js_panes = []
+    for p in pane_infos:
+        js_panes.append({
+            "slot": p["slot"],
+            "ready": p["ready"],
+            "audio": f"data:audio/mp3;base64,{p['audio_b64']}" if p["audio_b64"] else None,
+        })
+    panes_json = json.dumps(js_panes)
+
+    uid = base64.b64encode(os.urandom(6)).decode().replace("/", "_").replace("+", "-").rstrip("=")
+
+    # 숨겨진 audio 엘리먼트 (각 그림칸마다 정답·내녹음 2개씩)
+    audio_tags = ""
+    for p in pane_infos:
+        if p["audio_b64"]:
+            audio_tags += f'<audio id="aud_answer_{p["slot"]}_{uid}" src="data:audio/mp3;base64,{p["audio_b64"]}" preload="auto"></audio>'
+        audio_tags += f'<audio id="aud_mine_{p["slot"]}_{uid}" preload="auto"></audio>'
+
+    # 그리드 row 1: 녹음 버튼들
+    rec_buttons_html = ""
+    for slot_idx in range(1, n_pane_cols + 1):
+        if slot_idx <= len(pane_infos) and pane_infos[slot_idx - 1]["ready"]:
+            # 실제 활성 녹음 버튼
+            rec_buttons_html += (
+                f'<button id="rec_btn_{slot_idx}_{uid}" data-slot="{slot_idx}" '
+                f'style="background:#E74C3C;color:white;border:none;border-radius:8px;'
+                f'padding:14px 0;font-size:18px;font-weight:700;cursor:pointer;'
+                f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;'
+                f'transition:background 0.12s;">{slot_idx}</button>'
+            )
+        else:
+            # 비활성: 회색 disabled
+            rec_buttons_html += (
+                f'<button disabled '
+                f'style="background:#D5D8DC;color:#7F8C8D;border:none;border-radius:8px;'
+                f'padding:14px 0;font-size:18px;font-weight:700;cursor:not-allowed;opacity:0.6;'
+                f'user-select:none;">{slot_idx}</button>'
+            )
+    rec_buttons_html += (
+        f'<button id="reset_btn_{uid}" '
+        f'style="background:#E67E22;color:white;border:none;border-radius:8px;'
+        f'padding:14px 0;font-size:13px;font-weight:600;cursor:pointer;'
+        f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;">🎤 다시</button>'
+    )
+
+    # 그리드 row 2: 정답 듣기 버튼들 (초기 잠금)
+    play_buttons_html = ""
+    for slot_idx in range(1, n_pane_cols + 1):
+        if slot_idx <= len(pane_infos) and pane_infos[slot_idx - 1]["ready"]:
+            play_buttons_html += (
+                f'<button id="play_btn_{slot_idx}_{uid}" data-slot="{slot_idx}" disabled '
+                f'style="background:#BDC3C7;color:white;border:none;border-radius:8px;'
+                f'padding:14px 0;font-size:18px;font-weight:700;cursor:not-allowed;opacity:0.5;'
+                f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;'
+                f'transition:background 0.12s, opacity 0.12s;">{slot_idx}</button>'
+            )
+        else:
+            play_buttons_html += (
+                f'<button disabled '
+                f'style="background:#D5D8DC;color:#7F8C8D;border:none;border-radius:8px;'
+                f'padding:14px 0;font-size:18px;font-weight:700;cursor:not-allowed;opacity:0.6;'
+                f'user-select:none;">{slot_idx}</button>'
+            )
+    play_buttons_html += (
+        f'<button id="play_all_{uid}" disabled '
+        f'style="background:#BDC3C7;color:white;border:none;border-radius:8px;'
+        f'padding:14px 0;font-size:13px;font-weight:600;cursor:not-allowed;opacity:0.5;'
+        f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;">🔊 전체 듣기</button>'
+    )
+
+    html = f"""
+    <div style="font-family:-apple-system,system-ui,'Noto Sans KR',sans-serif;margin:0;">
+      {audio_tags}
+      <div style="display:grid;grid-template-columns:repeat({n_total_cols},1fr);gap:5px;margin-bottom:5px;">
+        {rec_buttons_html}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat({n_total_cols},1fr);gap:5px;">
+        {play_buttons_html}
+      </div>
+      <script>
+      (function(){{
+        var PANES = {panes_json};
+        var UID = '{uid}';
+        var recordings = {{}};   // {{slot: BlobURL}}
+        var mediaRecorder = null;
+        var micStream = null;
+        var currentRecSlot = null;
+        var isRecording = false;
+        var recTimer = null;
+        var recStart = 0;
+        var activeAudio = null;
+        var playQueue = [];
+
+        function $(id) {{ return document.getElementById(id); }}
+
+        // 녹음 버튼 라벨 복원 / 변경
+        function resetRecButtonVisual(slot) {{
+          var btn = $('rec_btn_' + slot + '_' + UID);
+          if (!btn) return;
+          btn.style.background = '#E74C3C';
+          btn.innerHTML = slot;
+        }}
+        function recordingVisual(slot) {{
+          var btn = $('rec_btn_' + slot + '_' + UID);
+          if (!btn) return;
+          btn.style.background = '#922B21';
+          btn.innerHTML = '<div style="font-size:10px;font-weight:400;opacity:0.85;">⏺ <span class="rec-timer">0:00</span></div><div style="font-size:13px;font-weight:700;">정지</div>';
+        }}
+
+        // 파랑 버튼 lock/unlock
+        function unlockPlay(slot) {{
+          var btn = $('play_btn_' + slot + '_' + UID);
+          if (!btn) return;
+          btn.disabled = false;
+          btn.style.background = '#2980B9';
+          btn.style.opacity = '1';
+          btn.style.cursor = 'pointer';
+        }}
+        function lockPlay(slot) {{
+          var btn = $('play_btn_' + slot + '_' + UID);
+          if (!btn) return;
+          btn.disabled = true;
+          btn.style.background = '#BDC3C7';
+          btn.style.opacity = '0.5';
+          btn.style.cursor = 'not-allowed';
+        }}
+
+        // 전체듣기 활성
+        function updatePlayAll() {{
+          var btn = $('play_all_' + UID);
+          if (!btn) return;
+          var any = Object.keys(recordings).length > 0;
+          btn.disabled = !any;
+          btn.style.background = any ? '#2980B9' : '#BDC3C7';
+          btn.style.opacity = any ? '1' : '0.5';
+          btn.style.cursor = any ? 'pointer' : 'not-allowed';
+        }}
+
+        // 재생 시퀀스
+        function stopAllPlayback() {{
+          if (activeAudio) {{
+            try {{ activeAudio.pause(); activeAudio.currentTime = 0; }} catch(e){{}}
+            activeAudio = null;
+          }}
+          playQueue = [];
+          clearHighlight();
+        }}
+        function highlightSlot(slot, kind) {{
+          clearHighlight();
+          var id = (kind === 'mine' ? 'rec_btn_' : 'play_btn_') + slot + '_' + UID;
+          var b = $(id);
+          if (b) b.style.boxShadow = '0 0 0 3px #FFE082';
+        }}
+        function clearHighlight() {{
+          document.querySelectorAll('button').forEach(function(b){{
+            if (b.style.boxShadow && b.style.boxShadow.indexOf('FFE082') >= 0) {{
+              b.style.boxShadow = '';
+            }}
+          }});
+        }}
+        function playNext() {{
+          if (activeAudio) {{
+            try {{ activeAudio.pause(); activeAudio.currentTime = 0; }} catch(e){{}}
+            activeAudio = null;
+          }}
+          if (playQueue.length === 0) {{ clearHighlight(); return; }}
+          var item = playQueue.shift();
+          var elemId = (item.kind === 'mine' ? 'aud_mine_' : 'aud_answer_') + item.slot + '_' + UID;
+          var a = $(elemId);
+          if (!a || !a.src) {{ playNext(); return; }}
+          activeAudio = a;
+          highlightSlot(item.slot, item.kind);
+          a.currentTime = 0;
+          var p = a.play();
+          if (p && p.catch) p.catch(function(err){{ console.error('play err', err); playNext(); }});
+        }}
+
+        // 모든 audio ended 리스너
+        PANES.forEach(function(p){{
+          var m = $('aud_mine_' + p.slot + '_' + UID);
+          if (m) m.addEventListener('ended', playNext);
+          var a = $('aud_answer_' + p.slot + '_' + UID);
+          if (a) a.addEventListener('ended', playNext);
+        }});
+
+        // 녹음 동작
+        function startRecording(slot) {{
+          stopAllPlayback();
+          if (isRecording) {{
+            stopRecording();
+            // 같은 칸 다시 누른 케이스: 일단 중단만 하고 종료
+            if (currentRecSlot === slot) return;
+          }}
+          navigator.mediaDevices.getUserMedia({{audio:true}}).then(function(stream){{
+            micStream = stream;
+            mediaRecorder = new MediaRecorder(stream);
+            var chunks = [];
+            mediaRecorder.ondataavailable = function(e){{ if (e.data.size > 0) chunks.push(e.data); }};
+            mediaRecorder.onstop = function(){{
+              var blob = new Blob(chunks, {{type: mediaRecorder.mimeType || 'audio/webm'}});
+              if (recordings[slot]) URL.revokeObjectURL(recordings[slot]);
+              var url = URL.createObjectURL(blob);
+              recordings[slot] = url;
+              var mineAudio = $('aud_mine_' + slot + '_' + UID);
+              if (mineAudio) mineAudio.src = url;
+              if (micStream) {{
+                micStream.getTracks().forEach(function(t){{ t.stop(); }});
+                micStream = null;
+              }}
+              isRecording = false;
+              resetRecButtonVisual(slot);
+              if (recTimer) {{ clearInterval(recTimer); recTimer = null; }}
+              unlockPlay(slot);
+              updatePlayAll();
+              currentRecSlot = null;
+            }};
+            mediaRecorder.start();
+            isRecording = true;
+            currentRecSlot = slot;
+            recStart = Date.now();
+            recordingVisual(slot);
+            recTimer = setInterval(function(){{
+              var elapsed = Math.floor((Date.now() - recStart) / 1000);
+              var mm = Math.floor(elapsed / 60);
+              var ss = elapsed % 60;
+              var el = document.querySelector('#rec_btn_' + slot + '_' + UID + ' .rec-timer');
+              if (el) el.textContent = mm + ':' + (ss < 10 ? '0' + ss : ss);
+            }}, 250);
+          }}).catch(function(err){{
+            console.error('mic err', err);
+            alert('마이크 권한이 필요합니다.');
+          }});
+        }}
+        function stopRecording() {{
+          if (mediaRecorder && mediaRecorder.state === 'recording') {{
+            mediaRecorder.stop();
+          }}
+        }}
+
+        // 녹음 버튼 클릭 핸들러
+        PANES.forEach(function(p){{
+          if (!p.ready) return;
+          var btn = $('rec_btn_' + p.slot + '_' + UID);
+          if (!btn) return;
+          btn.addEventListener('click', function(){{
+            if (isRecording && currentRecSlot === p.slot) {{
+              stopRecording();
+            }} else {{
+              startRecording(p.slot);
+            }}
+          }});
+        }});
+
+        // 정답 듣기 버튼 클릭 (내 녹음 → 정답)
+        PANES.forEach(function(p){{
+          var btn = $('play_btn_' + p.slot + '_' + UID);
+          if (!btn) return;
+          btn.addEventListener('click', function(){{
+            if (btn.disabled) return;
+            stopAllPlayback();
+            playQueue = [{{kind:'mine', slot:p.slot}}, {{kind:'answer', slot:p.slot}}];
+            playNext();
+          }});
+        }});
+
+        // 전체 듣기
+        var allBtn = $('play_all_' + UID);
+        if (allBtn) {{
+          allBtn.addEventListener('click', function(){{
+            if (allBtn.disabled) return;
+            stopAllPlayback();
+            var recorded = PANES.filter(function(p){{ return p.ready && recordings[p.slot]; }});
+            playQueue = [];
+            recorded.forEach(function(p){{ playQueue.push({{kind:'mine', slot:p.slot}}); }});
+            recorded.forEach(function(p){{ playQueue.push({{kind:'answer', slot:p.slot}}); }});
+            playNext();
+          }});
+        }}
+
+        // 다시 (모든 녹음 초기화)
+        var resetBtn = $('reset_btn_' + UID);
+        if (resetBtn) {{
+          resetBtn.addEventListener('click', function(){{
+            stopAllPlayback();
+            if (isRecording) stopRecording();
+            Object.keys(recordings).forEach(function(slot){{
+              try {{ URL.revokeObjectURL(recordings[slot]); }} catch(e){{}}
+              delete recordings[slot];
+              var mineAudio = $('aud_mine_' + slot + '_' + UID);
+              if (mineAudio) mineAudio.src = '';
+              lockPlay(slot);
+            }});
+            updatePlayAll();
+          }});
+        }}
+
+        // 페이지 이탈 시 모든 리소스 정리
+        window.addEventListener('beforeunload', function(){{
+          Object.values(recordings).forEach(function(url){{
+            try {{ URL.revokeObjectURL(url); }} catch(e){{}}
+          }});
+          if (micStream) micStream.getTracks().forEach(function(t){{ t.stop(); }});
+        }});
+      }})();
+      </script>
+    </div>
+    """
+    components.html(html, height=160, scrolling=False)
+
+
 def render_match_picker(image_path, image_student, chapter, all_students, image_matchings, client, key_suffix=""):
     """매칭 안 된 그림에 대해 학생 선택 드롭다운을 표시. (이미지 위쪽 위젯)
     매칭이 이미 되어있으면 아무것도 표시하지 않음."""
@@ -908,12 +1276,16 @@ def render_match_picker(image_path, image_student, chapter, all_students, image_
             st.error("매칭 저장 실패 — 잠시 후 다시 시도해 주세요.")
 
 
-def render_image_answer_widget(image_path, image_student, chapter, all_students, sentence_bank, chapter_mapping, image_matchings, client, key_suffix=""):
+def render_image_answer_widget(image_path, image_student, chapter, all_students, sentence_bank, chapter_mapping, image_matchings, client, key_suffix="", match_only=False):
     """이미지 아래에 표시되는 위젯 (SentenceBank · pane 단위).
     매칭됨 + 음원 있음                → 🔊 정답 듣기
     매칭됨 + 정답 있음 + 음원 없음   → 🕐 음원 생성 대기 중
     매칭됨 + 정답 자체 없음           → ⚠️ 정답 미입력
-    매칭 안됨                          → 표시 안 함 (위쪽 picker 가 처리)"""
+    매칭 안됨                          → 표시 안 함 (위쪽 picker 가 처리)
+
+    match_only=True 인 경우 — 오디오/메시지 영역 생략하고 매칭 수정 UI만 노출.
+      (playing 모드에서 render_section_audio_grid 가 이미 오디오를 처리하므로 중복 방지)
+    """
     image_filename = os.path.basename(image_path)
     chapter_str = str(chapter)
     key = (image_student, chapter_str, image_filename)
@@ -932,26 +1304,27 @@ def render_image_answer_widget(image_path, image_student, chapter, all_students,
     audio_exists = bool(audio_abs and os.path.exists(audio_abs))
     has_sentences = bool(sentence and sentence.strip())
 
-    if audio_exists:
-        render_audio_player(audio_abs)
-    elif has_sentences:
-        # 정답은 있는데 음원만 아직 안 만든 상태 (다음 TTS 트리거에서 만들어짐)
-        st.markdown(
-            '<div style="margin:0;color:#7B6F00;background:#FFF8E1;font-size:14px;'
-            'padding:12px 14px;border:1px solid #F0D070;border-radius:6px;'
-            'text-align:center;font-family:-apple-system,system-ui,sans-serif;">'
-            '🕐 음원 생성 대기 중</div>',
-            unsafe_allow_html=True
-        )
-    else:
-        # 정답 자체가 등록 안 됨
-        st.markdown(
-            '<div style="margin:0;color:#999;background:#fafafa;font-size:14px;'
-            'padding:12px 14px;border:1px dashed #ddd;border-radius:6px;'
-            'text-align:center;font-family:-apple-system,system-ui,sans-serif;">'
-            '⚠️ 정답 미입력</div>',
-            unsafe_allow_html=True
-        )
+    if not match_only:
+        if audio_exists:
+            render_audio_player(audio_abs)
+        elif has_sentences:
+            # 정답은 있는데 음원만 아직 안 만든 상태 (다음 TTS 트리거에서 만들어짐)
+            st.markdown(
+                '<div style="margin:0;color:#7B6F00;background:#FFF8E1;font-size:14px;'
+                'padding:12px 14px;border:1px solid #F0D070;border-radius:6px;'
+                'text-align:center;font-family:-apple-system,system-ui,sans-serif;">'
+                '🕐 음원 생성 대기 중</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            # 정답 자체가 등록 안 됨
+            st.markdown(
+                '<div style="margin:0;color:#999;background:#fafafa;font-size:14px;'
+                'padding:12px 14px;border:1px dashed #ddd;border-radius:6px;'
+                'text-align:center;font-family:-apple-system,system-ui,sans-serif;">'
+                '⚠️ 정답 미입력</div>',
+                unsafe_allow_html=True
+            )
 
     # 매칭 수정 UI
     edit_key = f"edit_match_{image_student}_{chapter_str}_{image_filename}_{key_suffix}"
@@ -1018,9 +1391,10 @@ def get_all_student_names():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_students_with_chapter_folder(chapter):
-    """특정 챕터(예: '602') 폴더가 현행/지난 챕터 하위에 있는 학생 이름 목록.
+    """특정 챕터(예: '602') 폴더가 현행/지난/보류/보관 하위에 있는 학생 이름 목록.
     페어 챕터 처리: '602' 검색 시 '602S' 폴더 가진 학생도 포함 (그 반대도 동일).
-    602와 602S는 자매 코스로 묶여있어 매칭 후보로 동일하게 취급."""
+    602와 602S는 자매 코스로 묶여있어 매칭 후보로 동일하게 취급.
+    보류·보관 폴더에 챕터가 있는 학생도 매칭 후보로 포함 (수업 잠시 쉬는 중인 학생의 그림도 매칭됨)."""
     chapter = str(chapter)
 
     # 페어 챕터 자동 확장
@@ -1039,7 +1413,7 @@ def get_students_with_chapter_folder(chapter):
             for student_d in os.listdir(target_path):
                 if student_d.startswith('.'):
                     continue
-                for sub in ALLOWED_SUBFOLDERS:
+                for sub in MATCHING_SUBFOLDERS:
                     sub_path = os.path.join(target_path, student_d, sub)
                     if not os.path.exists(sub_path):
                         continue
@@ -1229,130 +1603,104 @@ def get_label_bg_rgba(label_text: str):
     return (62, 129, 97, 180) 
 
 def create_summary_image_base64(student_name, results_list, db_df, question_text, current_year, current_month, attended_days):
-    TOTAL_WIDTH = 1140 
-    TARGET_HEIGHT = 120   
-    CELL_HEADER_H = 30    
-    CELL_H = TARGET_HEIGHT + CELL_HEADER_H 
+    """인증 이미지 — 단일 컬럼 양식.
+    - 헤더 (제목)
+    - 달력 (전폭, 출석 표시)
+    - 구간별 이미지 1열 × N행 (각 행 = 한 구간의 스토리보드)
+    - (있다면) Open-ended Question 전폭
+    """
+    TOTAL_WIDTH = 1140
     HEADER_HEIGHT = 90
-    CENTER_X = TOTAL_WIDTH // 2  
-    
+    SIDE_PAD = 30  # 좌우 여백
+
     try:
         font_title = ImageFont.truetype(FONT_PATH, 48)
         font_cal = ImageFont.truetype(FONT_PATH, 24)
-        font_overall = ImageFont.truetype(FONT_PATH, 30) 
-        font_q = ImageFont.truetype(FONT_PATH, 42) 
-        font_info = ImageFont.truetype(FONT_PATH, 24) 
+        font_q = ImageFont.truetype(FONT_PATH, 42)
+        font_info = ImageFont.truetype(FONT_PATH, 24)
     except:
-        font_title = font_cal = font_overall = font_q = font_info = ImageFont.load_default()
+        font_title = font_cal = font_q = font_info = ImageFont.load_default()
 
-    overall_counts = {}
-    if not db_df.empty:
-        student_df = db_df[(db_df['Student'] == student_name) & (db_df['Result'].isin(['O', 'X']))]
-        for ch, group in student_df.groupby('Chapter'):
-            ch_str = str(ch) 
-            if ch_str == 'Attendance': continue
-            o_count = (group['Result'] == 'O').sum()
-            total = len(group)
-            overall_counts[ch_str] = {'o': o_count, 'tot': total}
-            
-    for r in results_list:
-        ch_str = str(os.path.basename(os.path.dirname(r['file'])))
-        res = r['result']
-        if ch_str not in overall_counts:
-            overall_counts[ch_str] = {'o': 0, 'tot': 0}
-        overall_counts[ch_str]['tot'] += 1
-        if res == 'O':
-            overall_counts[ch_str]['o'] += 1
+    # 이미지 영역: 가로 전폭 활용
+    max_img_w = TOTAL_WIDTH - 2 * SIDE_PAD  # 1080
+    TARGET_HEIGHT = 240          # 전폭으로 늘어났으니 비율 맞춰 키움 (옛 120 의 2배)
+    CELL_HEADER_H = 30           # 배지 + O/X 행 높이
+    CELL_H = TARGET_HEIGHT + CELL_HEADER_H
 
-    overall_stats = {ch: int((data['o'] / data['tot']) * 100) for ch, data in overall_counts.items() if data['tot'] > 0}
-    sorted_chs = sorted(overall_stats.keys())
-
-    max_col_w = CENTER_X - 30  
+    # 이미지 데이터 준비 — 각 결과에 대해 한 행
     row_data = []
-    
     for r in results_list:
         p = r['file']
-        res = r['result'] 
+        res = r['result']
         try:
             img = Image.open(p).convert("RGBA")
             scale = TARGET_HEIGHT / img.size[1]
             new_w = int(img.size[0] * scale)
-            
-            if new_w > max_col_w:
-                img = img.resize((max_col_w, TARGET_HEIGHT), resample=Image.LANCZOS)
+            if new_w > max_img_w:
+                # 너무 넓으면 가로 cap
+                img = img.resize((max_img_w, TARGET_HEIGHT), resample=Image.LANCZOS)
             else:
                 img = img.resize((new_w, TARGET_HEIGHT), resample=Image.LANCZOS)
-            
             bg = Image.new("RGB", img.size, "WHITE")
             bg.paste(img, (0, 0), img)
-            
             if res == 'X':
                 bg = bg.convert("L").convert("RGB")
-            
             label = os.path.basename(os.path.dirname(p))
             _, hist = calculate_batting_average(db_df, student_name, p)
             hist.append(res)
-            hist = hist[-5:] 
-            
-            row_data.append({
-                'img': bg, 'label': label, 'hist': hist
-            })
-        except: continue
-    
+            hist = hist[-5:]
+            row_data.append({'img': bg, 'label': label, 'hist': hist})
+        except:
+            continue
+
+    # 달력 — 전폭으로 확장
     calendar.setfirstweekday(calendar.SUNDAY)
     cal_matrix = calendar.monthcalendar(current_year, current_month)
-    cal_row_height = 45 
-    CALENDAR_HEIGHT = cal_row_height + (len(cal_matrix) * cal_row_height) + 15 
-    
-    overall_stat_rows = ((len(sorted_chs) - 1) // 2) + 1 if sorted_chs else 0
-    OVERALL_HEIGHT = max(CALENDAR_HEIGHT, 50 + overall_stat_rows * 45) 
+    cal_row_height = 45
+    CALENDAR_HEIGHT = cal_row_height + (len(cal_matrix) * cal_row_height) + 15
 
-    grid_rows = (len(row_data) + 1) // 2
-    GRID_HEIGHT = grid_rows * CELL_H
+    GRID_HEIGHT = len(row_data) * CELL_H
 
     q_lines = []
     q_height = 0
     if question_text:
-        wrapped = textwrap.fill(question_text, width=60) 
+        wrapped = textwrap.fill(question_text, width=60)
         q_lines = wrapped.split('\n')
-        q_height = len(q_lines) * 60 + 50 
+        q_height = len(q_lines) * 60 + 50
 
-    TOTAL_HEIGHT = HEADER_HEIGHT + OVERALL_HEIGHT + GRID_HEIGHT + q_height
+    TOTAL_HEIGHT = HEADER_HEIGHT + CALENDAR_HEIGHT + GRID_HEIGHT + q_height
 
     final_image = Image.new("RGB", (TOTAL_WIDTH, TOTAL_HEIGHT), "white")
     draw = ImageDraw.Draw(final_image)
-    
+
     # [헤더]
     today = get_kst_now()
     today_display = today.strftime('%m/%d').lstrip("0").replace("/0", "/")
-    # 제목에 숙제 완료 및 체크 마크 추가
     title_text = f"{student_name} {today_display} 숙제 완료 ✔"
-    draw.text((30, 22), title_text, fill="black", font=font_title)
+    draw.text((SIDE_PAD, 22), title_text, fill="black", font=font_title)
 
-    # [달력 - 좌측]
+    # [달력 — 전폭]
     cal_start_y = HEADER_HEIGHT
     days_header = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
-    cal_width = CENTER_X - 30 
+    cal_width = TOTAL_WIDTH - 2 * SIDE_PAD  # 1080
     col_spacing = cal_width / 7.0
-    
+
     for i, day_str in enumerate(days_header):
         tw = draw.textlength(day_str, font=font_cal)
-        dx = 30 + i * col_spacing + (col_spacing - tw) / 2
+        dx = SIDE_PAD + i * col_spacing + (col_spacing - tw) / 2
         draw.text((dx, cal_start_y), day_str, fill="#95A5A6", font=font_cal)
-        
+
     cal_y = cal_start_y + cal_row_height
     for week in cal_matrix:
         for i, day in enumerate(week):
             if day != 0:
-                dx = 30 + i * col_spacing
+                dx = SIDE_PAD + i * col_spacing
                 dy = cal_y
                 day_str = str(day)
                 tw = draw.textlength(day_str, font=font_cal)
                 txt_x = dx + (col_spacing - tw) / 2
                 txt_y = dy + 7
-
                 is_today = (day == today.day and current_month == today.month and current_year == today.year)
-                
                 if day in attended_days:
                     bg_color = "#E74C3C" if is_today else "#95A5A6"
                     draw.rectangle([dx, dy, dx + col_spacing, dy + cal_row_height], fill=bg_color)
@@ -1361,68 +1709,42 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
                     draw.text((txt_x, txt_y), day_str, fill="black", font=font_cal)
         cal_y += cal_row_height
 
-    # [종합 타율 - 우측 2열]
-    stat_start_x = CENTER_X + 30
-    stat_start_y = HEADER_HEIGHT
-    
-    draw.text((stat_start_x, stat_start_y), "Batting Average", fill="#95A5A6", font=font_overall)
-    
-    stat_data_y = stat_start_y + 50
-    for idx, ch in enumerate(sorted_chs):
-        col = idx % 2 
-        row = idx // 2
-        x = stat_start_x + col * 240 
-        y = stat_data_y + row * 45 
-        
-        pct = overall_stats[ch]
-        pct_color = "#E74C3C" if pct <= 20 else "#F39C12" if pct <= 60 else "black"
-        
-        ch_text = str(ch)
-        tw = draw.textlength(ch_text, font=font_overall)
-        draw.text((x, y), ch_text, fill="#95A5A6", font=font_overall)
-        draw.text((x + tw + 15, y), f"{pct}%", fill=pct_color, font=font_overall)
+    # [그리드 — 단일 컬럼, 각 행 = 한 구간 스토리보드]
+    grid_y_start = HEADER_HEIGHT + CALENDAR_HEIGHT
 
-    # [그리드 이미지 렌더링]
-    grid_y_start = HEADER_HEIGHT + OVERALL_HEIGHT 
-    
     for i, item in enumerate(row_data):
-        r = i // 2
-        c = i % 2
-        x_off = 30 if c == 0 else CENTER_X
-        y_off = grid_y_start + r * CELL_H
-        
+        x_off = SIDE_PAD
+        y_off = grid_y_start + i * CELL_H
         badge_text = str(item['label'])
-        
-        # [수정] 텍스트가 위로 너무 붙어보이는 현상 교정: y_off - 3 에서 y_off - 2로 1픽셀 하강
         text_y_align = y_off - 2
-        
-        # 1) 배지(챕터 번호) 그리기
+
+        # 1) 배지 (챕터 번호)
         bg_rgba = get_label_bg_rgba(badge_text)
         bw = draw.textlength(badge_text, font=font_info) + 16
         draw.rectangle([x_off, y_off, x_off + bw, y_off + CELL_HEADER_H], fill=bg_rgba)
         draw.text((x_off + 8, text_y_align), badge_text, fill="white", font=font_info)
-        
-        # 2) O/X 히스토리 그리기 (구간 타율 삭제, 배지 바로 옆 15px 여백 후 밀착)
+
+        # 2) O/X 히스토리
         hist_start_x = x_off + bw + 15
         hist_list = item['hist']
         current_x = hist_start_x
-        
         for idx_h, char in enumerate(hist_list):
             is_last_item = (idx_h == len(hist_list) - 1)
             char_color = "#E74C3C" if (is_last_item and char == 'X') else "#95A5A6"
-            
             draw.text((current_x, text_y_align), char, fill=char_color, font=font_info)
             current_x += draw.textlength(char, font=font_info) + 6
 
-        # 3) 이미지 붙여넣기 
-        final_image.paste(item['img'], (x_off, y_off + CELL_HEADER_H))
+        # 3) 이미지 — 전폭의 가로 중앙 정렬
+        img_w = item['img'].size[0]
+        img_x = x_off + (max_img_w - img_w) // 2 if img_w < max_img_w else x_off
+        final_image.paste(item['img'], (img_x, y_off + CELL_HEADER_H))
 
-    # [질문 렌더링]
+    # [질문]
     y_offset = grid_y_start + GRID_HEIGHT
     if question_text:
-        text_y = y_offset + 15 
+        text_y = y_offset + 15
         for line in q_lines:
-            draw.text((30, text_y), line, fill="black", font=font_q)
+            draw.text((SIDE_PAD, text_y), line, fill="black", font=font_q)
             text_y += 60
 
     buffered = BytesIO()
@@ -2168,21 +2490,36 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
 
         display_responsive_image(current_img_path, is_grid=False)
 
+        # ── 구간 단위 멀티 그림칸 녹음·재생 그리드 ──
+        render_section_audio_grid(
+            current_img_path,
+            st.session_state['student_name'],
+            current_chapter,
+            st.session_state['sentence_bank'],
+            st.session_state['chapter_mapping'],
+            st.session_state['image_matchings'],
+        )
+
+        # ── 통과/미통과 (그리드 하단) — 파일 단위(=한 학생의 한 구간) 마킹 + 한 칸 진행 ──
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🙅 미통과", key='fail', use_container_width=True):
-                if not is_practice and client: save_to_sheet(client, st.session_state['student_name'], current_chapter, os.path.basename(current_img_path), "X")
+                if not is_practice and client:
+                    save_to_sheet(client, st.session_state['student_name'], current_chapter,
+                                  os.path.basename(current_img_path), "X")
                 st.session_state['results'].append({'file': current_img_path, 'result': 'X'})
                 st.session_state['current_index'] += 1
                 st.rerun()
         with col2:
             if st.button("🙆 통과", key='pass', use_container_width=True):
-                if not is_practice and client: save_to_sheet(client, st.session_state['student_name'], current_chapter, os.path.basename(current_img_path), "O")
+                if not is_practice and client:
+                    save_to_sheet(client, st.session_state['student_name'], current_chapter,
+                                  os.path.basename(current_img_path), "O")
                 st.session_state['results'].append({'file': current_img_path, 'result': 'O'})
                 st.session_state['current_index'] += 1
                 st.rerun()
 
-        # 매칭된 경우: 🔊 정답 듣기 + 매칭 수정 (이미지 아래)
+        # ── 매칭 수정 (현재 그림 owner 확인/변경) — 그리드가 오디오 다 처리하므로 여기선 매칭 수정 UI만 ──
         render_image_answer_widget(
             current_img_path,
             st.session_state['student_name'],
@@ -2193,6 +2530,7 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
             st.session_state['image_matchings'],
             client,
             key_suffix="play",
+            match_only=True,
         )
 
         if idx > 0 and not is_practice:
