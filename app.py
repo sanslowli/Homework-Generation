@@ -167,14 +167,100 @@ def save_answer(client, student, chapter, image, answer):
         return False
 
 # ==========================================
-# [정답 시트 v2] AnswerBank · ImageMatching
+# [정답 시트 v3] SentenceBank — 그림칸별 1문장 (노션 sync로 자동 채워짐)
 # ──────────────────────────────────────────
-# AnswerBank   : (Chapter, Section, Owner) → Sentences  (선생님이 입력)
+# SentenceBank : (Chapter, Pane, Owner) → Sentence  (sync_notion.py로 자동 채움)
 # ImageMatching: (ImageStudent, Chapter, Image) → ContentOwner (학생이 매칭)
-# 오디오 파일  : audio/{Chapter}/{Section}_{Owner}.mp3 (generate_tts.py 로 생성)
+# 오디오 파일  : audio/{Chapter}/{Pane}_{Owner}.mp3 (generate_tts.py 로 생성)
+#
+# [v2 — AnswerBank/구간 단위는 deprecated]
+# 옛 시트(AnswerBank, (Chapter, Section, Owner) → 여러 문장 합본)와 옛 오디오
+# (audio/{Chapter}/{Section}_{Owner}.mp3) 는 그대로 두고 학생 흐름에서는 안 씀.
+# 노션의 챕터별 그림칸 → 구간 매핑은 SentenceBank의 Section 컬럼으로 동기화돼 있음.
 # ==========================================
 ANSWER_BANK_HEADER = ["Chapter", "Section", "Owner", "Sentences", "Updated"]
 IMAGE_MATCHING_HEADER = ["ImageStudent", "Chapter", "Image", "ContentOwner", "Updated"]
+SENTENCE_BANK_TAB = "SentenceBank"
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _load_sentence_bank_rows(_client):
+    """SentenceBank 시트의 모든 행 dict 리스트 반환 (raw)."""
+    if _client is None:
+        return []
+    try:
+        ws = _client.open(SHEET_NAME).worksheet(SENTENCE_BANK_TAB)
+        return ws.get_all_records()
+    except Exception as e:
+        if "429" not in str(e):
+            st.error(f"[디버그] _load_sentence_bank_rows 에러: {type(e).__name__}: {e}")
+        return []
+
+
+def load_sentence_bank(_client):
+    """{(chapter, pane_str, owner): sentence} 반환. 음원/정답 lookup용."""
+    result = {}
+    for r in _load_sentence_bank_rows(_client):
+        chapter = str(r.get("Chapter", "")).strip()
+        pane = str(r.get("Pane", "")).strip()
+        owner = str(r.get("Owner", "")).strip()
+        sentence = r.get("Sentence", "")
+        if chapter and pane and owner and sentence:
+            result[(chapter, pane, owner)] = sentence
+    return result
+
+
+def load_chapter_mapping(_client):
+    """{(chapter, section_str): [sorted_panes]} 반환.
+    이미지 파일명 "1-3.png" → (section="1", slot=3) 에서 실제 pane 번호 찾기용."""
+    chapter_section_panes = {}
+    for r in _load_sentence_bank_rows(_client):
+        chapter = str(r.get("Chapter", "")).strip()
+        section = str(r.get("Section", "")).strip()
+        pane_str = str(r.get("Pane", "")).strip()
+        if not (chapter and section and pane_str):
+            continue
+        try:
+            pane_int = int(pane_str)
+        except ValueError:
+            continue
+        chapter_section_panes.setdefault((chapter, section), set()).add(pane_int)
+    return {k: sorted(v) for k, v in chapter_section_panes.items()}
+
+
+def extract_section_slot_from_filename(image_filename):
+    """'1-3.png' → ('1', 3), '11-2.png' → ('11', 2). 실패 시 (None, None)."""
+    try:
+        name = os.path.splitext(os.path.basename(image_filename))[0]
+        if "-" in name:
+            parts = name.split("-", 1)
+            section = parts[0].strip()
+            slot_part = parts[1].strip()
+            if section.isdigit() and slot_part.isdigit():
+                return section, int(slot_part)
+    except Exception:
+        pass
+    return None, None
+
+
+def image_to_pane(image_filename, chapter, chapter_mapping):
+    """이미지 파일명을 실제 그림칸 번호로 변환.
+
+    예: 601 챕터에서 '2-3.png' → section 2, slot 3.
+        601의 section 2가 panes [4, 5, 6] 이라면 → pane 6 (slot 3 = 3번째 = 6)
+    """
+    section, slot = extract_section_slot_from_filename(image_filename)
+    if section is None or slot is None:
+        return None
+    panes = chapter_mapping.get((str(chapter), section))
+    if not panes or slot < 1 or slot > len(panes):
+        return None
+    return panes[slot - 1]
+
+
+def get_audio_path_pane(chapter, pane, owner):
+    """audio/{chapter}/{pane}_{owner}.mp3 — pane 단위 오디오 (신규)."""
+    return os.path.join(BASE_FOLDER, "audio", str(chapter), f"{pane}_{owner}.mp3")
 
 def get_or_create_answer_bank_sheet(client):
     """AnswerBank 워크시트 반환. 없으면 생성."""
@@ -822,8 +908,8 @@ def render_match_picker(image_path, image_student, chapter, all_students, image_
             st.error("매칭 저장 실패 — 잠시 후 다시 시도해 주세요.")
 
 
-def render_image_answer_widget(image_path, image_student, chapter, all_students, answer_bank, image_matchings, client, key_suffix=""):
-    """이미지 아래에 표시되는 위젯.
+def render_image_answer_widget(image_path, image_student, chapter, all_students, sentence_bank, chapter_mapping, image_matchings, client, key_suffix=""):
+    """이미지 아래에 표시되는 위젯 (SentenceBank · pane 단위).
     매칭됨 + 음원 있음                → 🔊 정답 듣기
     매칭됨 + 정답 있음 + 음원 없음   → 🕐 음원 생성 대기 중
     매칭됨 + 정답 자체 없음           → ⚠️ 정답 미입력
@@ -836,14 +922,15 @@ def render_image_answer_widget(image_path, image_student, chapter, all_students,
     if not content_owner:
         return  # 매칭 안됨 → picker 가 위에서 처리
 
-    section = extract_section_from_filename(image_filename)
-    sentences = ""
+    # 이미지 파일명 → 그림칸(pane) 번호 변환 (챕터 매핑 활용)
+    pane = image_to_pane(image_filename, chapter_str, chapter_mapping)
+    sentence = ""
     audio_abs = None
-    if section:
-        sentences = answer_bank.get((chapter_str, section, content_owner), "")
-        audio_abs = get_audio_absolute_path(chapter_str, section, content_owner)
+    if pane is not None:
+        sentence = sentence_bank.get((chapter_str, str(pane), content_owner), "")
+        audio_abs = get_audio_path_pane(chapter_str, pane, content_owner)
     audio_exists = bool(audio_abs and os.path.exists(audio_abs))
-    has_sentences = bool(sentences and sentences.strip())
+    has_sentences = bool(sentence and sentence.strip())
 
     if audio_exists:
         render_audio_player(audio_abs)
@@ -1962,7 +2049,9 @@ if all_students_info:
                     st.session_state['db_data'] = db_df
                     # 정답/매칭 캐시 새로고침 (훈련 세션 시작 시 항상 최신 데이터로)
                     st.session_state.pop('answers_map', None)
-                    st.session_state.pop('answer_bank', None)
+                    st.session_state.pop('answer_bank', None)        # 레거시
+                    st.session_state.pop('sentence_bank', None)
+                    st.session_state.pop('chapter_mapping', None)
                     st.session_state.pop('image_matchings', None)
                     st.rerun()
 
@@ -2015,7 +2104,9 @@ if st.session_state['mode'] == 'setup':
                 })
                 # 정답/매칭 캐시 새로고침
                 st.session_state.pop('answers_map', None)
-                st.session_state.pop('answer_bank', None)
+                st.session_state.pop('answer_bank', None)        # 레거시
+                st.session_state.pop('sentence_bank', None)
+                st.session_state.pop('chapter_mapping', None)
                 st.session_state.pop('image_matchings', None)
                 st.rerun()
             else:
@@ -2053,9 +2144,11 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
         current_img_path = playlist[idx]
         current_chapter = os.path.basename(os.path.dirname(current_img_path))
 
-        # 정답 데이터 로드 (세션 캐시)
-        if 'answer_bank' not in st.session_state:
-            st.session_state['answer_bank'] = load_answer_bank(client) if client else {}
+        # 정답 데이터 로드 (세션 캐시) — SentenceBank (pane 단위) + 챕터 매핑
+        if 'sentence_bank' not in st.session_state:
+            st.session_state['sentence_bank'] = load_sentence_bank(client) if client else {}
+        if 'chapter_mapping' not in st.session_state:
+            st.session_state['chapter_mapping'] = load_chapter_mapping(client) if client else {}
         if 'image_matchings' not in st.session_state:
             st.session_state['image_matchings'] = load_image_matchings(client) if client else {}
 
@@ -2095,7 +2188,8 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
             st.session_state['student_name'],
             current_chapter,
             _chapter_students,
-            st.session_state['answer_bank'],
+            st.session_state['sentence_bank'],
+            st.session_state['chapter_mapping'],
             st.session_state['image_matchings'],
             client,
             key_suffix="play",
@@ -2130,7 +2224,8 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                 st.markdown(f"### 결과: {len([r for r in results if r['result'] == 'O'])} / {len(results)}")
 
                 # 결과 목록: 이미지 + O/X + 정답 듣기 (매칭/음원 기반)
-                _ans_bank = st.session_state.get('answer_bank') or (load_answer_bank(client) if client else {})
+                _sent_bank = st.session_state.get('sentence_bank') or (load_sentence_bank(client) if client else {})
+                _chap_map = st.session_state.get('chapter_mapping') or (load_chapter_mapping(client) if client else {})
                 _img_match = st.session_state.get('image_matchings') or (load_image_matchings(client) if client else {})
                 st.markdown("#### 📋 라운드 복기")
                 r_cols = st.columns(2)
@@ -2148,7 +2243,7 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                         )
                         render_image_answer_widget(
                             _r['file'], st.session_state['student_name'], _chapter,
-                            _chapter_students, _ans_bank, _img_match, client, key_suffix=f"result_{_ri}"
+                            _chapter_students, _sent_bank, _chap_map, _img_match, client, key_suffix=f"result_{_ri}"
                         )
                         st.markdown("&nbsp;", unsafe_allow_html=True)
 
@@ -2195,7 +2290,8 @@ elif st.session_state['mode'] == 'daily_result':
     # 정답 복기 (음원 + 매칭)
     st.markdown("---")
     with st.expander("📋 오늘의 라운드 복기 · 정답 듣기", expanded=False):
-        _ans_bank_d = st.session_state.get('answer_bank') or (load_answer_bank(client) if client else {})
+        _sent_bank_d = st.session_state.get('sentence_bank') or (load_sentence_bank(client) if client else {})
+        _chap_map_d = st.session_state.get('chapter_mapping') or (load_chapter_mapping(client) if client else {})
         _img_match_d = st.session_state.get('image_matchings') or (load_image_matchings(client) if client else {})
         d_cols = st.columns(2)
         for _di, _dr in enumerate(results):
@@ -2212,7 +2308,7 @@ elif st.session_state['mode'] == 'daily_result':
                 )
                 render_image_answer_widget(
                     _dr['file'], st.session_state['student_name'], _dchapter,
-                    _dchapter_students, _ans_bank_d, _img_match_d, client, key_suffix=f"daily_{_di}"
+                    _dchapter_students, _sent_bank_d, _chap_map_d, _img_match_d, client, key_suffix=f"daily_{_di}"
                 )
                 st.markdown("&nbsp;", unsafe_allow_html=True)
 
@@ -2235,8 +2331,9 @@ elif st.session_state['mode'] == 'records':
     for ch_path, ch_name in st.session_state['selected_chapters']:
         all_imgs.extend(get_images(st.session_state['folder_name'], st.session_state['student_name'], ch_path))
 
-    # 새 정답 시스템 데이터 로드
-    answer_bank_rec = load_answer_bank(client) if client else {}
+    # 새 정답 시스템 데이터 로드 (SentenceBank + chapter mapping)
+    sentence_bank_rec = load_sentence_bank(client) if client else {}
+    chapter_map_rec = load_chapter_mapping(client) if client else {}
     img_match_rec = load_image_matchings(client) if client else {}
 
     if all_imgs and 'db_data' in st.session_state:
@@ -2256,7 +2353,7 @@ elif st.session_state['mode'] == 'records':
                 )
                 render_image_answer_widget(
                     img_path, st.session_state['student_name'], ch_name_rec,
-                    chapter_students_rec, answer_bank_rec, img_match_rec, client, key_suffix=f"rec_{i}"
+                    chapter_students_rec, sentence_bank_rec, chapter_map_rec, img_match_rec, client, key_suffix=f"rec_{i}"
                 )
 
 elif st.session_state['mode'] == 'help':
