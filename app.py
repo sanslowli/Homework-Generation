@@ -1179,13 +1179,22 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
               updatePlayAll();
               currentRecSlot = null;
               // 손가락 떼서 종료된 경우: 내 녹음 자동 재생 (정답은 재생 X — 파란 버튼에서)
-              if (autoPlayAfterStop) {{
+              // mineAudio 가 blob 디코드를 마칠 때까지 기다림 (canplay 이벤트). 못 잡으면 400ms fallback.
+              if (autoPlayAfterStop && mineAudio) {{
                 autoPlayAfterStop = false;
-                setTimeout(function(){{
+                var fired = false;
+                function _doAutoPlay(){{
+                  if (fired) return;
+                  fired = true;
                   stopAllPlayback();
                   playQueue = [{{kind:'mine', slot: slot}}];
                   playNext();
-                }}, 80);
+                }}
+                mineAudio.addEventListener('canplay', _doAutoPlay, {{once:true}});
+                // canplay 가 안 잡힐 만일을 대비해 최대 400ms 후 강제 시도
+                setTimeout(_doAutoPlay, 400);
+                // 디코드 트리거를 위해 명시적으로 load()
+                try {{ mineAudio.load(); }} catch(e){{}}
               }}
             }};
             mediaRecorder.start();
