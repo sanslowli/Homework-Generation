@@ -1175,51 +1175,17 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
               resetRecButtonVisual(slot);
               if (recTimer) {{ clearInterval(recTimer); recTimer = null; }}
 
-              // 정답 오디오 미리 디코드/버퍼 워밍업 (첫 클릭 시 무음 0.3~수초 지연 회피)
-              // 무음(volume=0) 으로 살짝 play → pause → 볼륨 복귀 → unlock
-              var ansAudio = $('aud_answer_' + slot + '_' + UID);
-              function _finalize(){{
-                unlockPlay(slot);
-                updatePlayAll();
-                currentRecSlot = null;
-                // 자동 재생 플래그가 세팅돼있으면, 방금 저장된 내 녹음 자동 재생
-                if (autoPlayAfterStop) {{
-                  autoPlayAfterStop = false;
-                  setTimeout(function(){{
-                    stopAllPlayback();
-                    playQueue = [{{kind:'mine', slot: slot}}];
-                    playNext();
-                  }}, 80);
-                }}
-              }}
-              if (ansAudio && ansAudio.src) {{
-                try {{
-                  ansAudio.volume = 0;
-                  var pr = ansAudio.play();
-                  if (pr && pr.then) {{
-                    pr.then(function(){{
-                      setTimeout(function(){{
-                        try {{
-                          ansAudio.pause();
-                          ansAudio.currentTime = 0;
-                        }} catch(e){{}}
-                        ansAudio.volume = 1;
-                        _finalize();
-                      }}, 150);
-                    }}).catch(function(){{
-                      ansAudio.volume = 1;
-                      _finalize();
-                    }});
-                  }} else {{
-                    ansAudio.volume = 1;
-                    _finalize();
-                  }}
-                }} catch(e) {{
-                  ansAudio.volume = 1;
-                  _finalize();
-                }}
-              }} else {{
-                _finalize();
+              unlockPlay(slot);
+              updatePlayAll();
+              currentRecSlot = null;
+              // 손가락 떼서 종료된 경우: 내 녹음 자동 재생 (정답은 재생 X — 파란 버튼에서)
+              if (autoPlayAfterStop) {{
+                autoPlayAfterStop = false;
+                setTimeout(function(){{
+                  stopAllPlayback();
+                  playQueue = [{{kind:'mine', slot: slot}}];
+                  playNext();
+                }}, 80);
               }}
             }};
             mediaRecorder.start();
