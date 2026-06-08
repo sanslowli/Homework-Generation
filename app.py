@@ -1024,6 +1024,39 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
         var recStart = 0;
         var activeAudio = null;
         var playQueue = [];
+        var warmingLoops = {{}};  // {{slot: true}} — vol=0 로 loop 중인 슬롯
+
+        function startWarming(slot) {{
+          // 정답 오디오를 무음 루프로 돌려 오디오 출력 디바이스가 슬립 못 가게 함
+          // (Mac 브라우저: 마이크 정지 후 첫 재생 시 출력 디바이스 전환 ~0.3~4초 mute 회피)
+          var a = $('aud_answer_' + slot + '_' + UID);
+          if (!a || !a.src) return;
+          try {{
+            a.volume = 0;
+            a.loop = true;
+            var pr = a.play();
+            if (pr && pr.then) {{
+              pr.then(function(){{ warmingLoops[slot] = true; }}).catch(function(){{
+                a.volume = 1; a.loop = false;
+              }});
+            }} else {{
+              warmingLoops[slot] = true;
+            }}
+          }} catch(e) {{
+            a.volume = 1; a.loop = false;
+          }}
+        }}
+        function stopAllWarming() {{
+          Object.keys(warmingLoops).forEach(function(slot){{
+            var a = $('aud_answer_' + slot + '_' + UID);
+            if (a) {{
+              a.loop = false;
+              try {{ a.pause(); a.currentTime = 0; }} catch(e){{}}
+              a.volume = 1;
+            }}
+          }});
+          warmingLoops = {{}};
+        }}
 
         function $(id) {{ return document.getElementById(id); }}
 
