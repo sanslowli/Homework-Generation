@@ -974,7 +974,7 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
         f'<button id="reset_btn_{uid}" '
         f'style="background:#E67E22;color:white;border:none;border-radius:8px;'
         f'padding:14px 0;font-size:13px;font-weight:600;cursor:pointer;'
-        f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;">🎤 다시</button>'
+        f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;">🎙️ 다시</button>'
     )
 
     # 그리드 row 2: 정답 듣기 버튼들 (초기 잠금)
@@ -1171,7 +1171,10 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           }}
         }}
 
-        // 녹음 버튼 클릭 핸들러
+        // 빨간 버튼 클릭 핸들러
+        //   - 빈 슬롯: 녹음 시작
+        //   - 녹음 중인 슬롯: 정지 (녹음 저장 → 파랑 unlock)
+        //   - 이미 녹음된 슬롯: 내 녹음 재생
         PANES.forEach(function(p){{
           if (!p.ready) return;
           var btn = $('rec_btn_' + p.slot + '_' + UID);
@@ -1179,25 +1182,30 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           btn.addEventListener('click', function(){{
             if (isRecording && currentRecSlot === p.slot) {{
               stopRecording();
+            }} else if (recordings[p.slot]) {{
+              // 이미 녹음된 슬롯 → 내 녹음 재생
+              stopAllPlayback();
+              playQueue = [{{kind:'mine', slot:p.slot}}];
+              playNext();
             }} else {{
               startRecording(p.slot);
             }}
           }});
         }});
 
-        // 정답 듣기 버튼 클릭 (내 녹음 → 정답)
+        // 파란 버튼 클릭: 정답 mp3 만 재생 (내 녹음 X)
         PANES.forEach(function(p){{
           var btn = $('play_btn_' + p.slot + '_' + UID);
           if (!btn) return;
           btn.addEventListener('click', function(){{
             if (btn.disabled) return;
             stopAllPlayback();
-            playQueue = [{{kind:'mine', slot:p.slot}}, {{kind:'answer', slot:p.slot}}];
+            playQueue = [{{kind:'answer', slot:p.slot}}];
             playNext();
           }});
         }});
 
-        // 전체 듣기
+        // 전체 듣기 — 녹음된 슬롯들의 정답만 1→2→…→N 순차 재생 (내 녹음 X)
         var allBtn = $('play_all_' + UID);
         if (allBtn) {{
           allBtn.addEventListener('click', function(){{
@@ -1205,7 +1213,6 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
             stopAllPlayback();
             var recorded = PANES.filter(function(p){{ return p.ready && recordings[p.slot]; }});
             playQueue = [];
-            recorded.forEach(function(p){{ playQueue.push({{kind:'mine', slot:p.slot}}); }});
             recorded.forEach(function(p){{ playQueue.push({{kind:'answer', slot:p.slot}}); }});
             playNext();
           }});
