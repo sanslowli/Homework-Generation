@@ -1042,6 +1042,48 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
         var currentRecSlot = null;
         var isRecording = false;
         var recTimer = null;
+        var mineAudioUnlocked = {{}};  // {{slot: true}} — Safari unlock 완료된 슬롯
+
+        // 짧은 무음 WAV — Safari 의 mine audio element 첫 unlock 용 (user gesture 안에서 play 가능하도록)
+        function _makeSilentUrl(){{
+          var sr=8000, samples=80, ds=samples*2;
+          var b = new ArrayBuffer(44+ds);
+          var dv = new DataView(b);
+          function w(o,s){{ for (var i=0;i<s.length;i++) dv.setUint8(o+i, s.charCodeAt(i)); }}
+          w(0,'RIFF'); dv.setUint32(4, 36+ds, true);
+          w(8,'WAVE'); w(12,'fmt ');
+          dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+          dv.setUint32(24,sr,true); dv.setUint32(28,sr*2,true);
+          dv.setUint16(32,2,true); dv.setUint16(34,16,true);
+          w(36,'data'); dv.setUint32(40, ds, true);
+          return URL.createObjectURL(new Blob([b], {{type:'audio/wav'}}));
+        }}
+        var SILENT_URL = _makeSilentUrl();
+
+        function primeMineAudio(slot){{
+          // user gesture 안에서 호출되어야 함. Safari 에서 해당 mine element 를 unlock.
+          if (mineAudioUnlocked[slot]) return;
+          var a = $('aud_mine_' + slot + '_' + UID);
+          if (!a) return;
+          try {{
+            a.src = SILENT_URL;
+            a.muted = true;
+            var pr = a.play();
+            if (pr && pr.then) {{
+              pr.then(function(){{
+                a.pause();
+                a.muted = false;
+                mineAudioUnlocked[slot] = true;
+              }}).catch(function(){{
+                a.muted = false;
+              }});
+            }} else {{
+              a.pause();
+              a.muted = false;
+              mineAudioUnlocked[slot] = true;
+            }}
+          }} catch(e) {{ a.muted = false; }}
+        }}
         var recStart = 0;
         var activeAudio = null;
         var playQueue = [];
@@ -1242,6 +1284,8 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           if (isRecording) return;  // 이미 녹음 중이면 무시
           pressedSlot = slot;
           wantToStop = false;
+          // Safari 대응: user gesture 안에서 mine audio element 를 silent 로 unlock
+          primeMineAudio(slot);
           showRecBanner(slot);     // 즉시 시각 피드백 (배너)
           startRecording(slot);    // 임계 없이 바로 시작
         }}
