@@ -1003,8 +1003,29 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
     )
 
     html = f"""
-    <div style="font-family:-apple-system,system-ui,'Noto Sans KR',sans-serif;margin:0;">
+    <div style="font-family:-apple-system,system-ui,'Noto Sans KR',sans-serif;margin:0;position:relative;">
       {audio_tags}
+      <!-- 녹음 중 오버레이 배너 — 손가락이 버튼 가려도 보이도록 그리드 위에 띄움 -->
+      <div id="rec_banner_{uid}"
+           style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;
+                  background:rgba(231,76,60,0.95);color:white;border-radius:8px;
+                  z-index:10;flex-direction:column;align-items:center;justify-content:center;
+                  text-align:center;animation:recpulse_{uid} 1.1s ease-in-out infinite;
+                  pointer-events:none;">
+        <div style="font-size:17px;font-weight:600;line-height:1.2;">
+          ⏺ 녹음 중 · 슬롯 <span id="banner_slot_{uid}">-</span>
+        </div>
+        <div id="banner_timer_{uid}"
+             style="font-size:38px;font-weight:700;margin:6px 0;
+                    font-variant-numeric:tabular-nums;line-height:1;">0:00</div>
+        <div style="font-size:13px;opacity:0.92;font-weight:400;">손가락 떼면 정지</div>
+      </div>
+      <style>
+        @keyframes recpulse_{uid} {{
+          0%, 100% {{ box-shadow: inset 0 0 0 0 rgba(255,255,255,0.0); opacity:1; }}
+          50%      {{ box-shadow: inset 0 0 0 8px rgba(255,255,255,0.15); opacity:0.95; }}
+        }}
+      </style>
       <div style="display:grid;grid-template-columns:repeat({n_total_cols},1fr);gap:5px;margin-bottom:5px;">
         {rec_buttons_html}
       </div>
@@ -1126,6 +1147,15 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
             if (currentRecSlot === slot) return;
           }}
           navigator.mediaDevices.getUserMedia({{audio:true}}).then(function(stream){{
+            // mic 준비되기 전에 user 가 이미 손 뗐으면 즉시 중단
+            if (wantToStop) {{
+              wantToStop = false;
+              stream.getTracks().forEach(function(t){{ t.stop(); }});
+              isRecording = false;
+              currentRecSlot = null;
+              hideRecBanner();
+              return;
+            }}
             micStream = stream;
             mediaRecorder = new MediaRecorder(stream);
             var chunks = [];
@@ -1201,8 +1231,13 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
               var elapsed = Math.floor((Date.now() - recStart) / 1000);
               var mm = Math.floor(elapsed / 60);
               var ss = elapsed % 60;
+              var timeStr = mm + ':' + (ss < 10 ? '0' + ss : ss);
+              // 버튼 안 작은 타이머
               var el = document.querySelector('#rec_btn_' + slot + '_' + UID + ' .rec-timer');
-              if (el) el.textContent = mm + ':' + (ss < 10 ? '0' + ss : ss);
+              if (el) el.textContent = timeStr;
+              // 배너 큰 타이머
+              var bt = $('banner_timer_' + UID);
+              if (bt) bt.textContent = timeStr;
             }}, 250);
           }}).catch(function(err){{
             console.error('mic err', err);
@@ -1215,50 +1250,46 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           }}
         }}
 
-        // 빨간 버튼 — Hold-to-record + 떼면 자동 재생
-        //   - 꾹 누름 (>= 300ms): 녹음 시작 → 떼면 정지 + 자동 재생
-        //   - 짧게 탭 (< 300ms): 이미 녹음된 슬롯이면 내 녹음 재생, 빈 슬롯이면 no-op
-        var TAP_HOLD_MS = 300;
-        var pressTimer = null;
+        // 빨간 버튼 — 누르자마자 즉시 녹음 시작, 떼면 정지 + 자동 재생
+        //   임계 시간 0. 모든 누름은 녹음.
+        //   짧은 release 의 케이스: getUserMedia 가 아직 안 끝났으면 wantToStop 플래그로 처리.
         var pressedSlot = null;
+        var wantToStop = false;
         var autoPlayAfterStop = false;
+
+        function showRecBanner(slot){{
+          var b = $('rec_banner_' + UID);
+          var s = $('banner_slot_' + UID);
+          var t = $('banner_timer_' + UID);
+          if (b) b.style.display = 'flex';
+          if (s) s.textContent = slot;
+          if (t) t.textContent = '0:00';
+        }}
+        function hideRecBanner(){{
+          var b = $('rec_banner_' + UID);
+          if (b) b.style.display = 'none';
+        }}
 
         function onPressStart(slot, e){{
           if (e && e.cancelable) e.preventDefault();
-          if (isRecording) return;  // 이미 녹음 중인 케이스는 무시 (release 가 처리)
+          if (isRecording) return;  // 이미 녹음 중이면 무시
           pressedSlot = slot;
-          pressTimer = setTimeout(function(){{
-            pressTimer = null;
-            if (pressedSlot === slot) {{
-              // 임계 이상 hold → 녹음 시작
-              startRecording(slot);
-            }}
-          }}, TAP_HOLD_MS);
+          wantToStop = false;
+          showRecBanner(slot);     // 즉시 시각 피드백 (배너)
+          startRecording(slot);    // 임계 없이 바로 시작
         }}
 
         function onPressEnd(slot, e){{
           if (e && e.cancelable) e.preventDefault();
-          if (pressTimer) {{
-            // 임계 전 release → tap 동작
-            clearTimeout(pressTimer);
-            pressTimer = null;
-            pressedSlot = null;
-            if (recordings[slot]) {{
-              // 녹음된 슬롯 탭 → 내 녹음 재생
-              stopAllPlayback();
-              playQueue = [{{kind:'mine', slot: slot}}];
-              playNext();
-            }}
-            // 빈 슬롯 탭 → no-op
-            return;
-          }}
-          // 임계 이후 release → 녹음 중이면 정지 + 자동재생 플래그 세팅
+          pressedSlot = null;
           if (isRecording && currentRecSlot === slot) {{
             autoPlayAfterStop = true;
-            pressedSlot = null;
             stopRecording();
+            hideRecBanner();
           }} else {{
-            pressedSlot = null;
+            // mic 가 아직 준비 중일 때 release — 시작되면 즉시 중단되도록 플래그
+            wantToStop = true;
+            hideRecBanner();
           }}
         }}
 
@@ -1269,7 +1300,6 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           btn.addEventListener('mousedown', function(e){{ onPressStart(p.slot, e); }});
           btn.addEventListener('mouseup', function(e){{ onPressEnd(p.slot, e); }});
           btn.addEventListener('mouseleave', function(e){{
-            // 누른 채 버튼 밖으로 나가면 release 와 동일하게 처리
             if (pressedSlot === p.slot || (isRecording && currentRecSlot === p.slot)) {{
               onPressEnd(p.slot, e);
             }}
