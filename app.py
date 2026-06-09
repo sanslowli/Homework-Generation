@@ -1144,12 +1144,12 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           btn.style.opacity = '0.5';
           btn.style.cursor = 'not-allowed';
         }}
-        // 주황(내 녹음) 버튼 lock/unlock
+        // 🔈 (내 녹음) 버튼 lock/unlock — 색은 위 row 의 녹음 버튼과 동일한 빨강
         function unlockPlayMine(slot) {{
           var btn = $('play_mine_' + slot + '_' + UID);
           if (!btn) return;
           btn.disabled = false;
-          btn.style.background = '#E67E22';
+          btn.style.background = '#E74C3C';
           btn.style.opacity = '1';
           btn.style.cursor = 'pointer';
         }}
