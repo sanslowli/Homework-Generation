@@ -977,7 +977,32 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
         f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;">🎙️ 다시</button>'
     )
 
-    # 그리드 row 2: 정답 듣기 버튼들 (초기 잠금)
+    # 그리드 row 2 (NEW): 🔈 내 녹음 듣기 버튼들 + 🎙️ 합본 듣기 (초기 잠금, 녹음 완료 후 해당 슬롯만 unlock)
+    play_mine_buttons_html = ""
+    for slot_idx in range(1, n_pane_cols + 1):
+        if slot_idx <= len(pane_infos) and pane_infos[slot_idx - 1]["ready"]:
+            play_mine_buttons_html += (
+                f'<button id="play_mine_{slot_idx}_{uid}" data-slot="{slot_idx}" disabled '
+                f'style="background:#BDC3C7;color:white;border:none;border-radius:8px;'
+                f'padding:11px 0;font-size:17px;font-weight:600;cursor:not-allowed;opacity:0.5;'
+                f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;'
+                f'transition:background 0.12s, opacity 0.12s;">🔈</button>'
+            )
+        else:
+            play_mine_buttons_html += (
+                f'<button disabled '
+                f'style="background:#D5D8DC;color:#7F8C8D;border:none;border-radius:8px;'
+                f'padding:11px 0;font-size:17px;font-weight:600;cursor:not-allowed;opacity:0.6;'
+                f'user-select:none;">🔈</button>'
+            )
+    play_mine_buttons_html += (
+        f'<button id="play_all_{uid}" disabled '
+        f'style="background:#BDC3C7;color:white;border:none;border-radius:8px;'
+        f'padding:11px 0;font-size:13px;font-weight:600;cursor:not-allowed;opacity:0.5;'
+        f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;">🎙️ 합본 듣기</button>'
+    )
+
+    # 그리드 row 3: 정답 듣기 버튼들 — 5번째 컬럼은 비움 (행 1/2 와 정렬 유지 위해 grid template 은 동일)
     play_buttons_html = ""
     for slot_idx in range(1, n_pane_cols + 1):
         if slot_idx <= len(pane_infos) and pane_infos[slot_idx - 1]["ready"]:
@@ -995,12 +1020,7 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
                 f'padding:14px 0;font-size:18px;font-weight:700;cursor:not-allowed;opacity:0.6;'
                 f'user-select:none;">{slot_idx}</button>'
             )
-    play_buttons_html += (
-        f'<button id="play_all_{uid}" disabled '
-        f'style="background:#BDC3C7;color:white;border:none;border-radius:8px;'
-        f'padding:14px 0;font-size:13px;font-weight:600;cursor:not-allowed;opacity:0.5;'
-        f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;">🎙️ 합본 듣기</button>'
-    )
+    # 5번째 컬럼은 비움 — 시각적으로 1, 2번 row 와 align 만 맞추기
 
     html = f"""
     <div style="font-family:-apple-system,system-ui,'Noto Sans KR',sans-serif;margin:0;position:relative;">
@@ -1028,6 +1048,9 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
       </style>
       <div style="display:grid;grid-template-columns:repeat({n_total_cols},1fr);gap:5px;margin-bottom:5px;">
         {rec_buttons_html}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat({n_total_cols},1fr);gap:5px;margin-bottom:5px;">
+        {play_mine_buttons_html}
       </div>
       <div style="display:grid;grid-template-columns:repeat({n_total_cols},1fr);gap:5px;">
         {play_buttons_html}
@@ -1104,7 +1127,7 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           btn.innerHTML = '<div style="font-size:10px;font-weight:400;opacity:0.85;">⏺ <span class="rec-timer">0:00</span></div><div style="font-size:13px;font-weight:700;">정지</div>';
         }}
 
-        // 파랑 버튼 lock/unlock
+        // 파랑(정답) 버튼 lock/unlock
         function unlockPlay(slot) {{
           var btn = $('play_btn_' + slot + '_' + UID);
           if (!btn) return;
@@ -1115,6 +1138,23 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
         }}
         function lockPlay(slot) {{
           var btn = $('play_btn_' + slot + '_' + UID);
+          if (!btn) return;
+          btn.disabled = true;
+          btn.style.background = '#BDC3C7';
+          btn.style.opacity = '0.5';
+          btn.style.cursor = 'not-allowed';
+        }}
+        // 주황(내 녹음) 버튼 lock/unlock
+        function unlockPlayMine(slot) {{
+          var btn = $('play_mine_' + slot + '_' + UID);
+          if (!btn) return;
+          btn.disabled = false;
+          btn.style.background = '#E67E22';
+          btn.style.opacity = '1';
+          btn.style.cursor = 'pointer';
+        }}
+        function lockPlayMine(slot) {{
+          var btn = $('play_mine_' + slot + '_' + UID);
           if (!btn) return;
           btn.disabled = true;
           btn.style.background = '#BDC3C7';
@@ -1220,6 +1260,7 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
               if (recTimer) {{ clearInterval(recTimer); recTimer = null; }}
 
               unlockPlay(slot);
+              unlockPlayMine(slot);   // 🔈 버튼도 같이 활성화
               updatePlayAll();
               currentRecSlot = null;
               // 손가락 떼서 종료된 경우: 내 녹음 자동 재생 (정답은 재생 X — 파란 버튼에서)
@@ -1335,6 +1376,18 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           }});
         }});
 
+        // 🔈 내 녹음 듣기 버튼 — 해당 슬롯의 내 녹음 재생
+        PANES.forEach(function(p){{
+          var btn = $('play_mine_' + p.slot + '_' + UID);
+          if (!btn) return;
+          btn.addEventListener('click', function(){{
+            if (btn.disabled) return;
+            stopAllPlayback();
+            playQueue = [{{kind:'mine', slot: p.slot}}];
+            playNext();
+          }});
+        }});
+
         // 합본 듣기 — 자기 녹음 1→2→…→N 순차 재생 (베스트 합본)
         var allBtn = $('play_all_' + UID);
         if (allBtn) {{
@@ -1360,6 +1413,7 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
               var mineAudio = $('aud_mine_' + slot + '_' + UID);
               if (mineAudio) mineAudio.src = '';
               lockPlay(slot);
+              lockPlayMine(slot);  // 🔈 버튼도 잠금 복귀
             }});
             updatePlayAll();
           }});
