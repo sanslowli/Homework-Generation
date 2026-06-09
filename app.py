@@ -999,7 +999,7 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
         f'<button id="play_all_{uid}" disabled '
         f'style="background:#BDC3C7;color:white;border:none;border-radius:8px;'
         f'padding:14px 0;font-size:13px;font-weight:600;cursor:not-allowed;opacity:0.5;'
-        f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;">🔊 전체 듣기</button>'
+        f'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;">🎙️ 합본 듣기</button>'
     )
 
     html = f"""
@@ -1122,15 +1122,17 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           btn.style.cursor = 'not-allowed';
         }}
 
-        // 전체듣기 활성
+        // 합본 듣기 활성 — 활성 슬롯 모두 녹음되어야만 unlock
         function updatePlayAll() {{
           var btn = $('play_all_' + UID);
           if (!btn) return;
-          var any = Object.keys(recordings).length > 0;
-          btn.disabled = !any;
-          btn.style.background = any ? '#2980B9' : '#BDC3C7';
-          btn.style.opacity = any ? '1' : '0.5';
-          btn.style.cursor = any ? 'pointer' : 'not-allowed';
+          var activeCount = PANES.filter(function(p){{ return p.ready; }}).length;
+          var recordedCount = Object.keys(recordings).length;
+          var allDone = activeCount > 0 && recordedCount >= activeCount;
+          btn.disabled = !allDone;
+          btn.style.background = allDone ? '#E67E22' : '#BDC3C7';  // 주황 = 내 녹음 테마
+          btn.style.opacity = allDone ? '1' : '0.5';
+          btn.style.cursor = allDone ? 'pointer' : 'not-allowed';
         }}
 
         // 재생 시퀀스
@@ -1333,7 +1335,7 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           }});
         }});
 
-        // 전체 듣기 — 녹음된 슬롯들의 정답만 1→2→…→N 순차 재생 (내 녹음 X)
+        // 합본 듣기 — 자기 녹음 1→2→…→N 순차 재생 (베스트 합본)
         var allBtn = $('play_all_' + UID);
         if (allBtn) {{
           allBtn.addEventListener('click', function(){{
@@ -1341,7 +1343,7 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
             stopAllPlayback();
             var recorded = PANES.filter(function(p){{ return p.ready && recordings[p.slot]; }});
             playQueue = [];
-            recorded.forEach(function(p){{ playQueue.push({{kind:'answer', slot:p.slot}}); }});
+            recorded.forEach(function(p){{ playQueue.push({{kind:'mine', slot:p.slot}}); }});
             playNext();
           }});
         }}
