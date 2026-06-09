@@ -927,9 +927,9 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
             "audio_b64": audio_b64,
         })
 
-    # 그리드 컬럼: 최소 4 + 실제 패네 수가 더 많으면 그만큼 확장
-    n_pane_cols = max(4, len(pane_infos))
-    n_total_cols = n_pane_cols + 1  # +1 = 특수 버튼 컬럼
+    # 그리드 컬럼: 실제 그림칸 수만큼만 (회색 padding 안 함). +1 = 특수 버튼 컬럼.
+    n_pane_cols = len(pane_infos)
+    n_total_cols = n_pane_cols + 1
 
     # JS 에 넘길 데이터
     js_panes = []
