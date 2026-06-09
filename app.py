@@ -1871,10 +1871,8 @@ def create_summary_image_base64(student_name, results_list, db_df, question_text
             draw.text((current_x, text_y_align), char, fill=char_color, font=font_info)
             current_x += draw.textlength(char, font=font_info) + 6
 
-        # 3) 이미지 — 전폭의 가로 중앙 정렬
-        img_w = item['img'].size[0]
-        img_x = x_off + (max_img_w - img_w) // 2 if img_w < max_img_w else x_off
-        final_image.paste(item['img'], (img_x, y_off + CELL_HEADER_H))
+        # 3) 이미지 — 좌측 정렬 (배지·OX 와 시작점 동일)
+        final_image.paste(item['img'], (x_off, y_off + CELL_HEADER_H))
 
     # [질문]
     y_offset = grid_y_start + GRID_HEIGHT
@@ -2541,15 +2539,15 @@ if st.session_state['mode'] == 'setup':
             if client: st.session_state['db_data'] = get_data_from_sheet(client)
             db_df = st.session_state.get('db_data', pd.DataFrame())
             
-            curr_imgs = get_daily_target_images(folder_name, student_name, "현행 챕터", 6, db_df)
-            curr_shortfall = 6 - len(curr_imgs)  # 현행 부족분 → 지난에서 보충
+            curr_imgs = get_daily_target_images(folder_name, student_name, "현행 챕터", 2, db_df)
+            curr_shortfall = 2 - len(curr_imgs)  # 현행 부족분 → 지난에서 보충
 
-            past_target = 4 + curr_shortfall
+            past_target = 1 + curr_shortfall
             past_imgs = get_daily_target_images(folder_name, student_name, "지난 챕터", past_target, db_df)
             past_shortfall = past_target - len(past_imgs)  # 지난도 부족하면 → 현행에서 추가 보충
 
             if past_shortfall > 0:
-                curr_imgs = get_daily_target_images(folder_name, student_name, "현행 챕터", 6 + past_shortfall, db_df)
+                curr_imgs = get_daily_target_images(folder_name, student_name, "현행 챕터", 2 + past_shortfall, db_df)
             
             daily_playlist = curr_imgs + past_imgs
             random.shuffle(daily_playlist)
