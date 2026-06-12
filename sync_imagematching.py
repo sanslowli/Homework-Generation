@@ -100,12 +100,10 @@ def main():
         ws.append_row(HEADER)
 
     existing = ws.get_all_values()
-    if not existing:
-        ws.append_row(HEADER)
-        existing = [HEADER]
+    rows = [r[:] for r in existing[1:]] if len(existing) > 1 else []
 
     idx = {}
-    for i, r in enumerate(existing[1:], start=2):
+    for i, r in enumerate(rows):
         if len(r) >= 3:
             idx[(r[0], r[1], canon(r[2]))] = i
 
@@ -115,15 +113,24 @@ def main():
     for (student, chapter, image), owner in sorted(found.items()):
         key = (student, chapter, canon(image))
         if key in idx:
-            row_i = idx[key]
-            ws.update(f"C{row_i}:E{row_i}", [[image, owner, ts]])
+            r = rows[idx[key]]
+            while len(r) < 5:
+                r.append("")
+            r[2], r[3], r[4] = image, owner, ts
             updated += 1
         else:
-            ws.append_row([student, chapter, image, owner, ts])
+            rows.append([student, chapter, image, owner, ts])
+            idx[key] = len(rows) - 1
             appended += 1
 
-    print(f"ImageMatching sync: {updated} updated, {appended} appended "
-          f"(named files found: {len(found)})")
+    # ⚠ 행마다 update/append 호출하면 구글 쓰기 쿼터(분당 ~60) 초과로 실패함.
+    # sync_notion.py 와 동일하게 '한 번의 통째 쓰기'로 처리(읽기1 + clear1 + update1).
+    # 기존 행(앱이 쓴 매칭 포함)은 rows 에 그대로 들어있으므로 보존됨(= upsert).
+    ws.clear()
+    ws.update("A1", [HEADER] + rows)
+
+    print(f"ImageMatching sync: {updated} updated, {appended} appended, "
+          f"total {len(rows)} rows (named files: {len(found)})")
 
 
 if __name__ == "__main__":
