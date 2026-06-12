@@ -1,0 +1,75 @@
+name: Backfill image filenames (수동)
+
+# 터미널 없이 GitHub 웹에서 실행:
+#   레포 → Actions 탭 → 왼쪽 "Backfill image filenames (수동)" → "Run workflow"
+#   - apply 체크 해제(기본): 미리보기만. 어떤 파일이 어떻게 바뀔지 로그에 출력(변경 없음).
+#   - apply 체크: 실제 rename 후 자동 커밋·push.
+#
+# 하는 일: ImageMatching 시트를 읽어, 매칭이 기록됐는데 파일명에 주인 이름이 없는
+#          그림을 '1-3.png → 1-3박대호.png' 로 소급 rename. (미매칭 파일은 그대로 둠)
+#
+# 필요 secret: GCP_SERVICE_KEY_JSON  (다른 sync 워크플로와 동일)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: '실제 rename + 커밋 (체크 해제 시 미리보기만)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write          # rename 결과를 커밋·push 해야 하므로 write
+
+concurrency:
+  group: homework-pipeline   # 다른 sync/tts 워크플로와 공유 — 동시 실행 방지
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install gspread oauth2client
+
+      - name: Write Google service account key
+        env:
+          GCP_SERVICE_KEY_JSON: ${{ secrets.GCP_SERVICE_KEY_JSON }}
+        run: printf '%s' "$GCP_SERVICE_KEY_JSON" > service_key.json
+
+      - name: Run backfill (미리보기 또는 적용)
+        run: |
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            python backfill_image_filenames.py --apply
+          else
+            python backfill_image_filenames.py
+          fi
+
+      - name: Commit & push renames
+        if: ${{ inputs.apply == true }}
+        run: |
+          rm -f service_key.json
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "kusuk-bot"
+            git config user.email "actions@users.noreply.github.com"
+            git add -A
+            git commit -m "backfill: 그림 파일명 ← ImageMatching 시트 소급 동기화"
+            git push
+            echo "✅ rename 커밋·push 완료."
+          else
+            echo "변경 없음 — 이미 모두 동기화되어 있습니다."
+          fi
+
+      - name: Clean up secret files
+        if: always()
+        run: rm -f service_key.json
