@@ -1,0 +1,56 @@
+name: Sync filenames → ImageMatching
+
+# 선생님이 그림 파일을 '1-3박대호.png' 처럼 주인 이름을 붙여 push 하면,
+# 파일명을 파싱해 구글 시트 ImageMatching 탭에 upsert 한다.
+# (학생이 웹앱에서 한 매칭은 앱이 직접 시트에 쓰므로, 여기선 삭제 없이 upsert 만.)
+#
+# 필요 secret:
+#   GCP_SERVICE_KEY_JSON — 구글 서비스 계정 키(JSON). 다른 sync 워크플로와 동일.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Syntax Pitching/**'
+      - 'Syntax Only/**'
+      - 'Syntax + Open-ended Question/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read          # 시트만 쓰니까 repo commit 불필요
+
+concurrency:
+  group: homework-pipeline   # 다른 sync/tts 워크플로와 공유 — 동시 실행 방지
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install gspread oauth2client
+
+      - name: Write Google service account key
+        env:
+          GCP_SERVICE_KEY_JSON: ${{ secrets.GCP_SERVICE_KEY_JSON }}
+        run: printf '%s' "$GCP_SERVICE_KEY_JSON" > service_key.json
+
+      - name: Run sync_imagematching.py
+        run: python sync_imagematching.py
+
+      - name: Clean up secret files
+        if: always()
+        run: rm -f service_key.json
+
+      - name: Summary
+        run: echo "✅ 파일명 → ImageMatching 동기화 완료."

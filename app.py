@@ -1,6 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import os
+import re
 import random
 import json
 import gspread
@@ -231,18 +232,43 @@ def load_chapter_mapping(_client):
 
 
 def extract_section_slot_from_filename(image_filename):
-    """'1-3.png' → ('1', 3), '11-2.png' → ('11', 2). 실패 시 (None, None)."""
+    """'1-3.png' → ('1', 3), '11-2.png' → ('11', 2). 실패 시 (None, None).
+    소유자 이름이 붙은 '1-3배해주.png' 도 ('1', 3) 으로 허용(슬롯의 앞 숫자만 파싱)."""
     try:
         name = os.path.splitext(os.path.basename(image_filename))[0]
         if "-" in name:
             parts = name.split("-", 1)
             section = parts[0].strip()
             slot_part = parts[1].strip()
-            if section.isdigit() and slot_part.isdigit():
-                return section, int(slot_part)
+            m = re.match(r"^(\d+)", slot_part)
+            if section.isdigit() and m:
+                return section, int(m.group(1))
     except Exception:
         pass
     return None, None
+
+
+def match_image_key(image_filename):
+    """매칭 시트 키로 쓸 정규화된 파일명. '1-3배해주.png' → '1-3.png'.
+    파싱 불가하면 원본 basename 반환(하위호환)."""
+    section, slot = extract_section_slot_from_filename(image_filename)
+    if section is not None and slot is not None:
+        return f"{section}-{slot}.png"
+    return os.path.basename(image_filename)
+
+
+def owner_suffix_from_filename(image_filename):
+    """'1-3배해주.png' → '배해주'. 주인 suffix 없으면 ''."""
+    try:
+        name = os.path.splitext(os.path.basename(image_filename))[0]
+        if "-" in name:
+            slot_part = name.split("-", 1)[1].strip()
+            m = re.match(r"^\d+(.*)$", slot_part)
+            if m:
+                return m.group(1).strip()
+    except Exception:
+        pass
+    return ""
 
 
 def image_to_pane(image_filename, chapter, chapter_mapping):
@@ -368,7 +394,7 @@ def load_image_matchings(_client):
         for r in rows:
             img_student = str(r.get("ImageStudent", "")).strip()
             chapter = str(r.get("Chapter", "")).strip()
-            image = str(r.get("Image", "")).strip()
+            image = match_image_key(str(r.get("Image", "")).strip())  # '1-3배해주.png'→'1-3.png'
             owner = str(r.get("ContentOwner", "")).strip()
             if img_student and chapter and image and owner:
                 result[(img_student, chapter, image)] = owner
@@ -377,25 +403,83 @@ def load_image_matchings(_client):
         return {}
 
 def save_image_matching(client, image_student, chapter, image, content_owner):
-    """(ImageStudent, Chapter, Image) 키로 upsert. 빈 ContentOwner면 매칭 해제."""
+    """(ImageStudent, Chapter, Image) 키로 upsert. 빈 ContentOwner면 매칭 해제.
+    Image 는 항상 정규화된 맨이름('1-3.png')으로 저장·비교(파일명에 주인 붙어도 일관)."""
     if client is None:
         return False
     try:
         ws = get_or_create_image_matching_sheet(client)
         if ws is None:
             return False
+        image = match_image_key(image)
         rows = ws.get_all_values()
         timestamp = get_kst_now().strftime("%Y-%m-%d %H:%M:%S")
         found_row = None
         for i, r in enumerate(rows[1:], start=2):
-            if len(r) >= 3 and r[0] == image_student and r[1] == str(chapter) and r[2] == image:
+            if len(r) >= 3 and r[0] == image_student and r[1] == str(chapter) and match_image_key(r[2]) == image:
                 found_row = i
                 break
         if found_row:
-            ws.update(f"D{found_row}:E{found_row}", [[content_owner, timestamp]])
+            ws.update(f"C{found_row}:E{found_row}", [[image, content_owner, timestamp]])
         else:
             ws.append_row([image_student, str(chapter), image, content_owner, timestamp])
         load_image_matchings.clear()
+        return True
+    except Exception:
+        return False
+
+
+def try_rename_image_on_github(image_path, content_owner):
+    """매칭된 그림 파일을 GitHub 에서 '<섹션-슬롯><주인>.png' 로 rename(커밋).
+    목적: origin pull 후 로컬 폴더에서 아직 매칭 안 된 파일(이름 없는 것)을 육안 식별.
+    실패해도 매칭 저장에는 영향 없음(비차단). secrets(github_pat/github_repo) 미설정 시 조용히 skip."""
+    try:
+        gh_pat = st.secrets.get("github_pat", "")
+        gh_repo = st.secrets.get("github_repo", "")
+    except Exception:
+        gh_pat, gh_repo = "", ""
+    if not (gh_pat and gh_repo and content_owner):
+        return False
+    try:
+        import requests
+        from urllib.parse import quote
+        section, slot = extract_section_slot_from_filename(os.path.basename(image_path))
+        if section is None or slot is None:
+            return False
+        ext = os.path.splitext(image_path)[1] or ".png"
+        old_name = os.path.basename(image_path)
+        new_name = f"{section}-{slot}{content_owner}{ext}"
+        if old_name == new_name:
+            return True  # 이미 정리됨
+        rel_dir = os.path.relpath(os.path.dirname(image_path), BASE_FOLDER).replace(os.sep, "/")
+        old_path = old_name if rel_dir in (".", "") else f"{rel_dir}/{old_name}"
+        new_path = new_name if rel_dir in (".", "") else f"{rel_dir}/{new_name}"
+        headers = {
+            "Authorization": f"Bearer {gh_pat}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        api = f"https://api.github.com/repos/{gh_repo}/contents/"
+        g = requests.get(api + quote(old_path), headers=headers, params={"ref": "main"}, timeout=20)
+        if g.status_code != 200:
+            return False
+        info = g.json()
+        sha = info.get("sha")
+        content_b64 = info.get("content")
+        if not (sha and content_b64):
+            return False
+        p = requests.put(api + quote(new_path), headers=headers, timeout=20, json={
+            "message": f"match: {old_name} -> {new_name} ({content_owner})",
+            "content": content_b64.replace("\n", ""),
+            "branch": "main",
+        })
+        if p.status_code not in (200, 201):
+            return False
+        requests.delete(api + quote(old_path), headers=headers, timeout=20, json={
+            "message": f"match cleanup: remove {old_name}",
+            "sha": sha,
+            "branch": "main",
+        })
         return True
     except Exception:
         return False
@@ -892,7 +976,7 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
     - 매칭 안된/음원 없는 칸: 회색으로 잠금. 구간보다 적은 그림칸은 회색.
     - 매칭/녹음 상태 그대로 페이지 이동 시 휘발 (서버 전송 0).
     """
-    image_filename = os.path.basename(current_image_path)
+    image_filename = match_image_key(os.path.basename(current_image_path))
     section, _ = extract_section_slot_from_filename(image_filename)
     if section is None:
         return
@@ -1436,7 +1520,7 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
 def render_match_picker(image_path, image_student, chapter, all_students, image_matchings, client, key_suffix=""):
     """매칭 안 된 그림에 대해 학생 선택 드롭다운을 표시. (이미지 위쪽 위젯)
     매칭이 이미 되어있으면 아무것도 표시하지 않음."""
-    image_filename = os.path.basename(image_path)
+    image_filename = match_image_key(os.path.basename(image_path))
     key = (image_student, str(chapter), image_filename)
     if key in image_matchings:
         return  # 매칭 완료 → 위쪽엔 표시 안 함
@@ -1461,6 +1545,7 @@ def render_match_picker(image_path, image_student, chapter, all_students, image_
             # 세션 캐시 즉시 갱신 (rerun 후 새 매칭이 보이게)
             st.session_state.setdefault('image_matchings', {})
             st.session_state['image_matchings'][(image_student, str(chapter), image_filename)] = sel
+            try_rename_image_on_github(image_path, sel)  # GitHub 파일명에 주인 표기(비차단)
             st.toast(f"✅ '{sel}' 으로 매칭 저장됨")
             st.rerun()
         else:
@@ -1477,7 +1562,7 @@ def render_image_answer_widget(image_path, image_student, chapter, all_students,
     match_only=True 인 경우 — 오디오/메시지 영역 생략하고 매칭 수정 UI만 노출.
       (playing 모드에서 render_section_audio_grid 가 이미 오디오를 처리하므로 중복 방지)
     """
-    image_filename = os.path.basename(image_path)
+    image_filename = match_image_key(os.path.basename(image_path))
     chapter_str = str(chapter)
     key = (image_student, chapter_str, image_filename)
     content_owner = image_matchings.get(key)
@@ -1543,6 +1628,7 @@ def render_image_answer_widget(image_path, image_student, chapter, all_students,
                         # 세션 캐시 즉시 갱신
                         st.session_state.setdefault('image_matchings', {})
                         st.session_state['image_matchings'][(image_student, chapter_str, image_filename)] = new_sel
+                        try_rename_image_on_github(image_path, new_sel)  # GitHub 파일명 갱신(비차단)
                         st.toast(f"매칭이 '{new_sel}' 으로 수정됨")
                         st.session_state.pop(edit_key, None)
                         st.rerun()
@@ -2697,7 +2783,7 @@ elif st.session_state['mode'] in ['playing', 'daily_playing']:
                 (str(current_chapter), _cur_section_str), []
             )
             _img_match_key = (st.session_state['student_name'], str(current_chapter),
-                              os.path.basename(current_img_path))
+                              match_image_key(os.path.basename(current_img_path)))
             _owner_for_image = st.session_state.get('image_matchings', {}).get(_img_match_key)
             if _owner_for_image and _panes_in_sec:
                 for _pn in _panes_in_sec:

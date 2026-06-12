@@ -13,6 +13,37 @@
 
 ---
 
+## v0.8 (2026-06-12) — 그림 매칭 ↔ 파일명 양방향 동기화 (선생님 사전 매칭)
+
+**변경**
+- 파일명 파서(`extract_section_slot_from_filename`)를 주인 이름 suffix 허용으로 변경:
+  `1-3배해주.png` → 섹션 1, 슬롯 3 (슬롯의 앞 숫자만 파싱). 맨이름 `1-3.png` 동작은 그대로(하위호환).
+- 신규 헬퍼 `match_image_key()` — ImageMatching 시트 키를 항상 맨이름 `1-3.png` 로 정규화.
+  load/save/조회/오디오 그리드/활성칸 계산 등 매칭 키 사용 지점 전부 이 키로 통일(확장자도 `.png` 통일).
+- `save_image_matching`: 저장 시 Image 정규화 + 기존 행 탐색도 정규화 비교(레거시 주인-붙은 행을 제자리 갱신).
+- 신규 `try_rename_image_on_github()`: 웹앱에서 매칭하면 GitHub의 그림 파일을
+  `1-1.png → 1-1배해주.png` 로 rename(커밋). 기존 `github_pat`/`github_repo` secret + GitHub Contents API 재사용.
+  실패해도 매칭 저장엔 영향 없음(비차단), secret 없으면 조용히 skip.
+- 신규 역방향 파이프라인:
+  - `sync_imagematching.py` — `Syntax Pitching/…` 등 폴더의 *주인 붙은* 파일명을 파싱해 ImageMatching 탭에
+    **upsert**(삭제 없음 → 앱이 직접 쓴 행 보존). 미매칭(맨이름) 파일은 무시.
+  - `.github/workflows/sync_imagematching.yml` — 이미지 폴더 push 시(또는 수동) 위 스크립트 실행.
+    `GCP_SERVICE_KEY_JSON` secret 사용(기존 sync 워크플로와 동일), `concurrency: homework-pipeline` 공유.
+
+**의도**
+- 학생이 아직 웹앱에서 그림 매칭을 안 하면 ImageMatching 시트가 비어, 선생님이 '오늘 수업 예문 망라'를
+  미리 준비하기 어려웠다 → 선생님이 **로컬에서 파일명만 바꿔 push** 하면 매칭이 시트에 반영되는 사전 입력 경로 추가.
+- 파일명을 '눈으로 보는 진실'로 삼아, origin pull 후 로컬 폴더에서 **이름 없는 파일 = 미매칭**을 한눈에 식별.
+- 시트 쓰기는 upsert 로만 해서 앱(학생) 매칭과 파일명(선생님) 매칭이 충돌 없이 공존.
+
+**수강생/운영 효과**
+- 선생님이 수업 전, 학생 숙제 완료 여부와 무관하게 사용할 예문을 미리 망라·검토 가능.
+- 매칭 진행 상황을 폴더에서 즉시 가시화(이름표 있는 파일 = 완료).
+- 주의: 실제 동작은 Streamlit 배포 환경에서 1회 검증 필요(특히 rename 의 GitHub 권한·기본 브랜치 `main`,
+  `GCP_SERVICE_KEY_JSON` secret 존재). 매칭 그림은 .png 가정.
+
+---
+
 ## v0.7 (2026-06-08) — 빨간 버튼 듣기 분리 + 출제량 축소 + 인증 이미지 양식 변경
 
 **변경**
