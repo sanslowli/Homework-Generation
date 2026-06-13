@@ -13,6 +13,34 @@
 
 ---
 
+## v0.9 (2026-06-12) — 선생님 모드(정답 입력·TTS 버튼·대시보드) 제거 + sync 쿼터 수정
+
+**변경**
+- app.py 에서 **선생님 모드(`?teacher=1`) 블록 전체 제거** — 정답 입력(AnswerBank) 화면, 인앱
+  "🎙️ TTS 생성 시작" 버튼, 수강생 대시보드 뷰. (총 ~846줄 삭제: 3046 → 2200)
+- 함께 죽은 코드 정리: `render_answer_reveal`, AnswerBank 함수 3종 + `ANSWER_BANK_HEADER`,
+  "Answers" 시트 함수 3종(`get_or_create_answers_sheet`/`load_answers_for_student`/`save_answer`),
+  `LEGACY_BACKFILL_CHAPTER`.
+- **유지**: 학생이 정답을 듣는 쪽 전부(SentenceBank 로더, `render_audio_player`,
+  `render_section_audio_grid`, `render_image_answer_widget`, `get_audio_path_pane`, `audio/`),
+  그림 매칭(ImageMatching·`save_image_matching`·`try_rename_image_on_github`), TTS 파이프라인
+  (`generate_tts.py`/`.yml`).
+- `sync_imagematching.py` 버그픽스: 행마다 `ws.update`/`append_row` 개별 호출 → 매칭 파일 319개에서
+  구글 쓰기 쿼터 초과로 워크플로 exit 1. **메모리 병합 후 1회 통째 쓰기**(`ws.clear()` + 단일
+  `ws.update("A1", …)`)로 변경, `sync_notion.py` 와 동일 패턴. upsert(기존 행 보존)는 유지.
+
+**의도**
+- TTS 동기화를 노션 버튼 기반으로 옮기면서 인앱 정답 입력·TTS 트리거가 불필요해짐.
+- 선생님 대시보드는 어차피 시트 데이터를 보여주는 것이라, 별도 빙고 예문 대시보드(아티팩트)로
+  통합 가능 → 앱을 학생 전용으로 슬림화.
+- 매칭 파일이 많아질수록(특히 backfill 후) sync 워크플로가 쿼터로 죽던 문제 해결.
+
+**수강생/운영 효과**
+- 학생 앱은 기능 변화 없음(보던 화면 그대로). 코드만 가벼워져 유지보수·배포 안정성 ↑.
+- 파일명 → 시트 동기화가 대량 매칭에서도 한 번에 성공.
+
+---
+
 ## v0.8 (2026-06-12) — 그림 매칭 ↔ 파일명 양방향 동기화 (선생님 사전 매칭)
 
 **변경**
