@@ -807,6 +807,15 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
             )
     # 5번째 컬럼은 비움 — 시각적으로 1, 2번 row 와 align 만 맞추기
 
+    # 미매칭(ContentOwner 없음): 빨강 버튼 전부 잠긴 이유를 아주 작게 안내
+    unmatched_notice_html = ""
+    if not matched_owner:
+        unmatched_notice_html = (
+            '<div style="font-size:10px;color:#AEB4BC;text-align:center;'
+            'line-height:1.3;margin-bottom:4px;user-select:none;">'
+            '아직 그림 주인 매칭 전이라 잠겨 있어요</div>'
+        )
+
     html = f"""
     <div style="font-family:-apple-system,system-ui,'Noto Sans KR',sans-serif;margin:0;position:relative;">
       {audio_tags}
@@ -831,6 +840,7 @@ def render_section_audio_grid(current_image_path, image_student, chapter, senten
           50%      {{ box-shadow: inset 0 0 0 8px rgba(255,255,255,0.15); opacity:0.95; }}
         }}
       </style>
+      {unmatched_notice_html}
       <div style="display:grid;grid-template-columns:repeat({n_total_cols},1fr);gap:5px;margin-bottom:5px;">
         {rec_buttons_html}
       </div>
