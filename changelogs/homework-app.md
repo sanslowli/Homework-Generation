@@ -13,28 +13,65 @@
 
 ---
 
-## 현재 기능 (베이스라인 — 2026-06-19 app.py 정독)
+## ⚠️ 교차 의존 (2026-06-22) — 이 공개 레포가 kusukmap-webapp 자산 소스가 됨
+- 이 레포(`github.com/sanslowli/Homework-Generation`, **public**)의 **이미지(`Syntax Pitching/.../*.png`)·음원(`audio/{챕터}/{pane}_{owner}.mp3`)**을, 이관 중인 통합 웹앱이 **jsDelivr CDN**(`cdn.jsdelivr.net/gh/sanslowli/Homework-Generation@main/<경로>`)으로 직접 끌어 씀(R2 업로드 대신). → **레포를 private 전환하거나 자산 폴더 경로·파일명 규칙을 바꾸면 웹앱 피칭 화면이 깨짐.** 변경 시 `kusukmap-webapp` 경로 매핑과 함께 손봐야 함.
+- 보안 OK: `service_key.json`·`openai_key.txt`는 `.gitignore`라 미커밋(공개돼도 키 노출 없음). 공개 자산 = 교재 이미지·레퍼런스 TTS뿐(학생 본인 녹음 아님).
+- 상세·진행 = `~/Kusuk HQ/kusukmap-webapp/docs/kusukban-integration.md` §4 + 그 폴더 `changelogs/kusukmap-webapp.md`(P2).
 
-> 바이브코딩 시작점. 아래는 *현행 `app.py`(~2200줄)에 실제 구현된* 기능. 변경 시 이 섹션도 갱신.
+---
 
-**진입·세션 (mode: setup / playing / daily_playing / daily_result / help)**
-- 수강생 선택 = 사이드바 selectbox **또는 URL `?student={이름}`**(학생별 딥링크). 미등록 이름이면 경고 후 수동 선택.
-- `?view=manual` → 사용법(Manual) 페이지.
+## ★ app.py 전체 명세 (베이스라인 — 무엇을 하는 앱인가)
 
-**두 갈래 출제**
-- **Daily Homework**(버튼): 자동 3장 = 현행 챕터 2 + 지난 챕터 1, 한쪽 부족 시 다른 쪽에서 보충. 셔플 출제.
-- **챕터 선택 연습**: 사이드바에서 챕터 복수선택 + 타율 필터(batting filter) → "훈련 시작". "피칭 기록 보기"로 누적 기록 조회.
+> **이 섹션 = 코드를 안 봐도 app.py가 *하는 일 전체*를 알 수 있는 단일 명세.** 아래 변경이력(version)이 *무엇이 바뀌었나*라면, 이 섹션은 *현재 무엇인가*다. **app.py 기능이 바뀌면 변경이력 추가와 함께 이 명세도 갱신**(동기화 규약 = §G·`../CLAUDE.md` §6). 마지막 정독: 2026-06-22(app.py ~2210줄).
 
-**플레이 화면**
-- 그림 1장 표시 → 그림 보고 발화. 오디오 위젯 3-Row(🎙️Hold to Record→자동재생 / 🔈내 녹음 / ▶️정답 듣기) + 🎙️합본 듣기. Safari unlock priming.
-- O(통과)/X(미통과) 마킹 → Google Sheet 저장. 이전/다음 이동, 셔플, 연습 모드.
-- 정답 음성 = SentenceBank(노션→시트 동기화) + ImageMatching(보드 slot→주인) 조회. 그림↔주인 매칭 = 앱 내 self-serve + 파일명 기반.
+### A. 한 줄 정체
+Syntax Bingo 수강생이 **수업에서 만든 자기/동료 손그림을 보고, 그 자리에서 영어로 발화하며 강세·리듬을 혼자 반복 훈련**하는 Streamlit 웹앱(`syntax-pitching.streamlit.app`). 야구 피칭 머신 비유 — 그림이 공처럼 날아오면 즉시 발화. 주1회 대면 수업 사이의 **평일 데일리 루틴 장치**. 정규 수강생 전용 무료 부속물(별도 결제 X). 녹음은 **100% 브라우저 메모리, 서버 송신 0**(신뢰 약속).
 
-**데이터·집계**
-- 타율(최근 5회) 계산, 출제 우선순위(타율 낮음 + 5회 미만 신규) 가중.
-- **카톡 인증 이미지** 자동 생성(Daily 완료 시 summary 이미지 → 단톡방 출석 루프).
-- 오픈형 질문(random question, `questions.json`/`asked_questions.json`).
-- 선생님 모드(정답입력·TTS버튼·대시보드)는 **v0.9에서 제거** — 앱은 학생 전용.
+### B. 사용자 플로우 (세션 모드)
+세션 상태 = `setup` / `playing`(챕터 선택 연습) / `daily_playing`(데일리) / `daily_result`(데일리 완료·인증) / `help`(매뉴얼).
+- **진입**: 사이드바 selectbox로 학생 선택 **또는 URL `?student={이름}`** 딥링크(미등록 이름이면 경고 후 수동). `?view=manual`이면 사용법 페이지로 라우팅.
+- **두 갈래 출제**:
+  1. **Daily Homework**(메인 버튼) → `daily_playing`: 자동 **3장**(현행 챕터 2 + 지난 챕터 1, 한쪽 부족 시 다른 쪽 보충). 끝나면 `daily_result`에서 **카톡 인증 이미지** 생성.
+  2. **챕터 선택 연습** → `playing`: 사이드바에서 챕터 복수선택 + **타율 필터**(약점만 골라내기) → "훈련 시작". "피칭 기록 보기"로 누적 기록 조회.
+
+### C. 화면별 상세
+- **플레이 화면(그림 1장)**: 손그림 1장 표시 → 보고 발화. 하단 **3-Row 오디오 위젯**:
+  - ① 🎙️ **Hold to Record**(빨강, 떼면 자동재생 ~250ms) — MediaRecorder, 외부 오버레이 배너로 녹음상태 시각화(손가락이 작은 버튼 가리는 문제 해결).
+  - ② 🔈 **내 녹음 듣기**(빨강, 명시 재생).
+  - ③ ▶️ **정답 듣기**(파랑, 클릭만 — 자동재생 X = 자기 녹음 전 정답 누설 차단).
+  - \+ 🎙️ **합본 듣기**(구간 전체 정답 이어듣기). **Safari 오디오 unlock priming**(무음 WAV로 element unlock — 건드릴 때 주의).
+  - **O(통과)/X(미통과)** 마킹 → Google Sheet 저장. 이전/다음·셔플·연습 이동. 빈 슬롯은 회색 아닌 **미표시**.
+  - 미매칭(그림 주인 미상)이면 녹음 줄 통째 잠금 + 회색 안내("아직 그림 주인 매칭 전이라 잠겨 있어요").
+- **정답 음원 매칭 경로**: 그림 파일 → `image_to_pane`(구간·slot) → ImageMatching 시트(slot→**ContentOwner**) → SentenceBank(정답·구간) → `audio/{챕터}/{Pane}_{Owner}.mp3`. 그림↔주인 매칭은 **앱 내 self-serve 드롭다운** + **파일명 기반**(`{구간}-{slot}{주인}.png`) 양방향.
+- **데일리 완료 인증**: `create_summary_image_base64`가 그날 푼 그림들 + 출석 달력 + 오픈형 질문을 한 장으로 합성 → 단톡방에 도장 찍는 출석 의례.
+- **피칭 기록**: 챕터별 O/X 누적·타율 조회.
+- **매뉴얼**(`?view=manual`): 사용법 설명 페이지.
+
+### D. 함수 지도 (코드 구조, ~2210줄)
+- **설정·연결**: `init_connection`(gspread, st.secrets) · `get_data_from_sheet` · `save_to_sheet`(O/X 기록).
+- **데이터 로더**: `load_sentence_bank`(정답·구간) · `load_chapter_mapping`(구간 경계) · `load_image_matchings`(slot→주인) · `save_image_matching` · `try_rename_image_on_github`(앱 매칭 시 GitHub 파일명 rename 커밋, 비차단).
+- **파일명/매칭 파서**: `extract_section_slot_from_filename` · `match_image_key`(맨이름 정규화) · `owner_suffix_from_filename` · `image_to_pane` · `extract_section_from_filename` · `get_audio_path_pane`/`get_audio_relative_path`/`get_audio_absolute_path`.
+- **렌더링(핵심·대형)**: `render_audio_player`(3-Row 위젯·Safari unlock, 348~663) · `render_section_audio_grid`(플레이 그리드 본체, 664~1230) · `render_match_picker` · `render_image_answer_widget`.
+- **탐색·통계**: `get_all_student_names`/`get_students_with_chapter_folder`/`get_chapters`/`get_images`/`get_all_students` · `get_attendance`(출석 달력) · `get_random_question`(오픈형 질문 `questions.json`) · `calculate_batting_average`(최근 5회 타율) · `get_daily_target_images`(데일리 3장 선정).
+- **인증 이미지**: `get_label_bg_rgba` · `create_summary_image_base64`(PIL 합성).
+- **UI 본체**: 사이드바(1740~) · 메인 로직(1825~) · 매뉴얼(2172~).
+
+### E. 출제·학습 알고리즘 (코드만 봐선 의도 모름)
+- **데일리 = 매일 3장**(현행 2 + 지난 1). **0608 확정 — 10장으로 되돌리지 말 것**(양<깊이, 3분 루틴).
+- **출제 우선순위**: ① 타율 낮은 그림(최근 5회) ② 5회 미만 신규. = 약점 보강 + 데이터 수집 동시. **미통과 누를수록 다음 출제 확률↑ → 기록 자체가 커리큘럼.**
+- 커닝페이퍼(화면 꾹 누르면 정답 노출). 빙고판 40문장(자기10+동료30)이 유효기간 — 잊기 전 반복이 핵심.
+
+### F. 데이터 통합 (권위 원본)
+`Syntax Pitching DB`(Google Sheets: `ImageMatching`·`SentenceBank`·피칭기록) ← `sync_notion.py`로 노션(`SYNTAX INDEX`·예문 DB·빙고판 DB·수강증 DB) 동기화. TTS = `generate_tts.py`(SentenceBank→`audio/`). GitHub Actions 정기 sync + Make.com(노션 버튼→웹훅). 상세 = `../CLAUDE.md` §3.
+
+### G. 역할 (사업·커리큘럼에서의 위치)
+- **리텐션 장치**: 주1회 대면의 효과를 평일에 이어 붙여 망각 방지 → 수강생 경험·완주율·재결제에 기여(`~/Kusuk HQ/kusukban/persona.md` Retention economy).
+- **데이터 수집기**: 발화 타율·약점이 쌓여 커리큘럼·첨삭 피드백 루프의 원료.
+- **상품 페이지 자산(예정)**: bio 링크 수업소개를 더 효과적인 상품 페이지로 만들 때의 핵심 demo. → kusukmap-webapp 통합 시 정식 웹앱으로 이주 검토(Next Steps).
+- ⚠️ **앱 ≠ 상품**: 이 앱(SyntaxPitching 자가복습툴) ≠ Syntax Pitching™ 1:1 프라이빗 코칭 상품(`~/Kusuk HQ/kusukban/products.md`, 현재 보류).
+
+### G-2. 이 명세 동기화 규약
+app.py의 **기능·플로우·알고리즘·데이터 경로가 바뀌면** → 해당 version 항목 추가 *그리고* 위 A~G에서 바뀐 부분 갱신(둘 다). "마지막 정독" 날짜도 갱신. 코드만 고치고 이 명세를 안 고치면 = 다음 세션이 거짓 명세를 읽음(드리프트). 작업 방식 = `../CLAUDE.md` §6.
 
 ---
 
@@ -42,7 +79,7 @@
 
 > San과 바이브코딩하며 *개발하기로 정한* 과제를 여기 쌓는다(결정된 것만, 날짜 동반). 막연한 아이디어 X.
 
-- **(방향) kusukmap 웹앱과 통합 검토** — SyntaxPitching을 kusukmap.com 플랫폼에 통합하는 안. 구체 범위·시점 미정(2026-06-19 기록). 큰 사업/플랫폼 결정이라 본부 의제와 연동.
+- **(진행 골조 확정 0622) kusukmap 웹앱과 통합** — SyntaxPitching 학생 경험을 kusukmap.com Next 플랫폼으로 이관 + 쿠숙반 상품 페이지. **골조·MVP선·Phase = `~/Kusuk HQ/kusukmap-webapp/docs/kusukban-integration.md`.** 요지: 프론트(UX)+상품페이지만 이관(딥링크 신원·기존 Sheets/Notion 백엔드 그대로), 회원/결제/DB이관은 Step 2. 이 ★app.py 명세가 이관 원본.
 - _(이후 합의된 과제를 여기 추가)_
 
 ---
