@@ -274,8 +274,30 @@ def extract_sentences(sentence_pages: list, chapter_mapping: dict) -> list:
 
 
 # ─── 시트 기록 ───
+def with_retry(fn, what: str, tries: int = 3, base_delay: float = 5.0):
+    """구글 API 일시 장애(5xx) 지수 백오프 재시도 — 2026-07-06 새벽 503 실사고 방어.
+
+    5xx만 재시도(일시 장애). 4xx(권한·잘못된 요청)는 재시도해도 같으므로 즉시 raise.
+    """
+    for attempt in range(1, tries + 1):
+        try:
+            return fn()
+        except gspread.exceptions.APIError as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status is None or status < 500 or attempt == tries:
+                raise
+            delay = base_delay * (2 ** (attempt - 1))
+            log.warning("⚠️ 구글 API %s (%s) — %d/%d회, %.0f초 후 재시도", status, what, attempt, tries, delay)
+            time.sleep(delay)
+
+
 def write_to_sheet(rows: list) -> None:
-    """SentenceBank 시트에 전체 교체 방식으로 기록."""
+    """SentenceBank 시트에 전체 교체 방식으로 기록.
+
+    ★ clear() 선행 금지(2026-07-06): '지우기 → 쓰기' 사이에 API가 죽으면 시트가 텅 빈 채 남아
+      피칭 정답·음원 lookup이 전부 죽는다. → 덮어쓰기 먼저, 남는 아래 행만 뒤에 정리.
+      어느 시점에 실패해도 시트에는 옛 데이터 또는 새 데이터가 항상 온전히 존재.
+    """
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive",
@@ -284,16 +306,26 @@ def write_to_sheet(rows: list) -> None:
         str(SERVICE_KEY_PATH), scope
     )
     client = gspread.authorize(creds)
-    spreadsheet = client.open(SHEET_NAME)
+    spreadsheet = with_retry(lambda: client.open(SHEET_NAME), "스프레드시트 열기")
 
-    try:
-        ws = spreadsheet.worksheet(WORKSHEET_NAME)
-    except gspread.exceptions.WorksheetNotFound:
-        log.info("SentenceBank 시트가 없어 새로 만듭니다.")
-        ws = spreadsheet.add_worksheet(title=WORKSHEET_NAME, rows=2000, cols=10)
+    def get_or_create_ws():
+        try:
+            return spreadsheet.worksheet(WORKSHEET_NAME)
+        except gspread.exceptions.WorksheetNotFound:
+            log.info("SentenceBank 시트가 없어 새로 만듭니다.")
+            return spreadsheet.add_worksheet(title=WORKSHEET_NAME, rows=2000, cols=10)
 
-    ws.clear()
-    ws.update("A1", [HEADERS_ROW] + rows)
+    ws = with_retry(get_or_create_ws, "워크시트 조회")
+
+    values = [HEADERS_ROW] + rows
+    with_retry(lambda: ws.update("A1", values), "본문 덮어쓰기")
+    # 새 데이터가 옛 데이터보다 짧을 때 남는 아래 행 정리(범위 clear — 시트 전체 clear 아님).
+    old_rows = ws.row_count
+    if old_rows > len(values):
+        with_retry(
+            lambda: ws.batch_clear([f"A{len(values) + 1}:Z{old_rows}"]),
+            "잔여 행 정리",
+        )
     log.info("📤 SentenceBank 시트에 헤더 + %d행 기록 완료", len(rows))
 
 
