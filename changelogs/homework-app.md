@@ -1,8 +1,8 @@
 # Homework App — 변경 이력
 
-**위치:** `~/Homework-Generation/changelogs/homework-app.md` (Homework App 부서 폴더 안)
-**작성:** Homework App 부서 (이 채팅)가 버전 올릴 때마다 추가
-**참조:** Kusuk Staff 본부. 본부 채팅에서 보려면 San이 본부 폴더와 함께 이 폴더를 마운트해야 함.
+**위치:** `~/Kusuk HQ/Homework-Generation/changelogs/homework-app.md` (SyntaxPitching Engineering 부서 폴더 안 — 2026-06-19 HQ 산하 이관, 별도 마운트 불필요. 2026-07-08 md정리로 옛 주소·'Kusuk Staff 본부' 표기 정정)
+**작성:** SyntaxPitching Engineering 부서가 버전 올릴 때마다 추가
+**참조:** 본부 = `~/Kusuk HQ/` (HQ 정독 규약에 이 changelog 포함).
 
 각 버전 항목:
 - **변경**: 기술적 변경 내역 (불릿)
