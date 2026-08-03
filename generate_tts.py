@@ -34,6 +34,7 @@ generate_tts.py — SentenceBank 기준으로 OpenAI TTS mp3 파일 생성
 
 import os
 import sys
+import time
 import argparse
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -80,14 +81,31 @@ def get_sheet_client():
     return gspread.authorize(creds)
 
 
+def with_retry(fn, what, tries=5, base_delay=10.0):
+    """구글 API 5xx·429(쿼터) 지수 백오프 재시도 (2026-08-01 — sync_notion.with_retry와 같은 규약).
+    429는 4xx지만 '분당 쿼터 붐빔'이라 기다리면 풀리는 일시 장애 — 웹앱이 잠깐 쿼터를 태운 순간
+    파이프라인이 통째로 죽던 사고(#93) 방어. 그 외 4xx(권한·잘못된 요청)는 즉시 raise."""
+    for attempt in range(1, tries + 1):
+        try:
+            return fn()
+        except gspread.exceptions.APIError as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            retryable = status is not None and (status >= 500 or status == 429)
+            if not retryable or attempt == tries:
+                raise
+            delay = base_delay * (2 ** (attempt - 1))
+            print(f"⚠️ 구글 API {status} ({what}) — {attempt}/{tries}회, {delay:.0f}초 후 재시도")
+            time.sleep(delay)
+
+
 def load_sentence_bank_rows(client):
     """SentenceBank 시트의 모든 행을 dict 리스트로 반환."""
     try:
-        ws = client.open(SHEET_NAME).worksheet(SENTENCE_BANK_TAB)
+        ws = with_retry(lambda: client.open(SHEET_NAME).worksheet(SENTENCE_BANK_TAB), "시트 열기")
     except gspread.exceptions.WorksheetNotFound:
         print(f"❌ '{SENTENCE_BANK_TAB}' 시트가 없습니다. 먼저 sync_notion.py로 동기화하세요.")
         sys.exit(1)
-    return ws.get_all_records()
+    return with_retry(lambda: ws.get_all_records(), "본문 읽기")
 
 
 def get_audio_path(chapter, pane, owner):
@@ -249,6 +267,12 @@ def main():
             print(f"   • {rel}: {err}")
     print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print(f"\n다음 단계: git add audio/ && git commit -m 'Add TTS audio files' && git push")
+
+    # ★ 실패가 있으면 종료코드 1 (2026-08-01) — 종전엔 전부 실패해도 exit 0이라 워크플로가 초록으로 끝났다.
+    #   OpenAI 잔액 소진·키 만료·모델 폐기 같은 사고가 조용히 지나가면 음원 없는 칸이 수업 당일에야 발각됨.
+    #   ※ 성공분은 이미 저장·사이드카 갱신됐으니, 워크플로의 커밋 스텝은 if: always() 로 남긴다(부분 성과 보존).
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

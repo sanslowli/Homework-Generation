@@ -93,7 +93,10 @@ jobs:
           rm -f service_key.json openai_key.txt
 
       # ─── 3단계: 새 mp3·txt 자동 커밋·푸시 ───
+      # ★ if: always() (2026-08-01) — TTS 일부 실패로 스텝이 빨개져도 *성공한 mp3는 커밋*한다.
+      #   (generate_tts가 실패 시 exit 1을 내게 바뀜 — 사고를 초록으로 숨기지 않되, 부분 성과는 보존)
       - name: Check for new audio files
+        if: always()
         id: check_audio
         run: |
           if [ -n "$(git status --porcelain audio/)" ]; then
@@ -103,7 +106,7 @@ jobs:
           fi
 
       - name: Commit and push audio files
-        if: steps.check_audio.outputs.has_changes == 'true'
+        if: always() && steps.check_audio.outputs.has_changes == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

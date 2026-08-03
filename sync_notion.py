@@ -274,17 +274,21 @@ def extract_sentences(sentence_pages: list, chapter_mapping: dict) -> list:
 
 
 # ─── 시트 기록 ───
-def with_retry(fn, what: str, tries: int = 3, base_delay: float = 5.0):
-    """구글 API 일시 장애(5xx) 지수 백오프 재시도 — 2026-07-06 새벽 503 실사고 방어.
+def with_retry(fn, what: str, tries: int = 5, base_delay: float = 10.0):
+    """구글 API 일시 장애 지수 백오프 재시도 — 2026-07-06 새벽 503 실사고 방어.
 
-    5xx만 재시도(일시 장애). 4xx(권한·잘못된 요청)는 재시도해도 같으므로 즉시 raise.
+    재시도 대상 = 5xx(일시 장애) + ★429(쿼터 초과, 2026-08-01 추가).
+      429는 4xx지만 '지금 붐빔'이라 기다리면 풀리는 일시 장애다 — 종전엔 4xx로 뭉뚱그려 즉사시켜
+      웹앱이 분당 읽기 쿼터를 잠깐 태운 순간 파이프라인 전체가 죽었다(0801 실사고: TTS 워크플로 #93).
+      쿼터는 '분당' 창이라 10→20→40→80초 백오프면 대개 다음 창에서 통과. 4xx 나머지(권한·잘못된 요청)는 즉시 raise.
     """
     for attempt in range(1, tries + 1):
         try:
             return fn()
         except gspread.exceptions.APIError as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
-            if status is None or status < 500 or attempt == tries:
+            retryable = status is not None and (status >= 500 or status == 429)
+            if not retryable or attempt == tries:
                 raise
             delay = base_delay * (2 ** (attempt - 1))
             log.warning("⚠️ 구글 API %s (%s) — %d/%d회, %.0f초 후 재시도", status, what, attempt, tries, delay)
