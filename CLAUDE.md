@@ -4,6 +4,8 @@
 
 이 폴더(`Homework-Generation/`)는 **쿠숙반(@kusukban) Syntax Bingo™ 수강생 자가복습 웹앱**(Streamlit)의 코드·운영 자산 부서다. 운영 도메인 `syntax-pitching.streamlit.app`.
 
+> **★ Streamlit 앱 폐기 확인(San 2026-08-14).** 학생 대면은 kusukmap.com 웹앱 단독. 이 폴더의 현역 = **자산(그림·audio)·파이프라인(sync·TTS Actions)** — `app.py`류는 레거시 보존물. 웹앱 백엔드가 시트→Supabase로 이전 중(0814 핫패스 완료)이라, 이 레포 스크립트의 시트 표적도 2단계에서 전환 예정(`changelogs/homework-app.md` 0814 노트).
+
 > 이 문서는 코드 보면 아는 것(Streamlit·MediaRecorder·PIL 등 일반 기술)은 적지 않는다. **사람에게 듣지 않으면 알 수 없는** 비즈니스 컨텍스트·명명 규칙·도메인 룰만 담는다. 현재 기능·변경 이력·향후 과제(Next Steps)는 → **`changelogs/homework-app.md`**.
 
 ---
@@ -82,6 +84,7 @@ Syntax Bingo 수업은 수강생이 필연적으로 **자기 손그림 + 문장*
 | `*.app`(Syntax Pitching™·전체 숙제 생성) | Mac 더블클릭 런처 |
 | `백업 *.py` · `app (backup).py` · `syntax_pitching *.py` | 구버전 백업(현행 = `app.py`) |
 | `Generate Homework All.py` · `generate_tts.py` · `sync_notion.py` · `sync_imagematching.py` · `backfill_image_filenames.py` | 배치·동기화 스크립트 |
+| `{모드}/{학생}/{학생}_{챕터}_빙고판.pdf`·`.png` | **빙고판 재인쇄 산출물**(학생이 판·교재를 안 들고 온 날 즉석 재출력). 공정 = 스킬 `bingo-reprint`(호명 "빙고판 재인쇄") → `~/Kusuk HQ/kusukban/🗃️ 교재/_auto-generator/rebuild_board.py`. 이름만 주면 모드·챕터 자동 판정, 레벨(심화/기초)만 확인받음. 전례 0716 장규원 603(수기) → 0818 스크립트화 |
 
 ## 5. ⚠️ 보안 주의
 

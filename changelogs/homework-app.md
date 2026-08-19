@@ -23,6 +23,11 @@
 - **의도**: 워크플로 #93 실패 원인 = `client.open()`에서 **구글 시트 읽기 분당 쿼터 429**(TTS 실행 전 사망 — OpenAI 잔액과 무관). 근인은 웹앱(kusukmap-webapp)의 0729 세트 조회가 미생성 탭을 캐시 없이 반복 호출해 **같은 서비스 계정 쿼터를 태운 것**(같은 날 CellPass 불안정과 동일 사건, 웹앱 쪽 캐시로 수리 완료). 파이프라인은 남의 순간적 쿼터 사용에 통째로 죽지 않도록 방어. ★교차 의존 메모: **웹앱과 이 레포 스크립트는 같은 구글 서비스 계정 쿼터(분당 읽기)를 공유** — 한쪽 폭주가 다른 쪽을 죽인다.
 - **수강생 효과**: 수업 당일 음원 누락 사고 감소(사고가 초록으로 숨지 않고 빨갛게 드러남 + 일시 쿼터로는 안 죽음).
 
+## 🔄 교차 의존 갱신 (2026-08-14) — 웹앱 백엔드 시트 → Supabase 이전 1단계
+- **웹앱 핫패스(통과·딜·게임로그·피칭기록·출석 등)가 구글 시트를 떠남**(kusukmap-webapp 0814, Supabase Postgres 서울). ⟹ 0801에 기록한 "웹앱과 이 레포가 같은 서비스 계정 분당 쿼터를 공유 — 한쪽 폭주가 다른 쪽을 죽인다" 교차 사고는 **사실상 소멸**(웹앱의 시트 읽기 = ImageMatching·SentenceBank 캐시 조회만 잔존).
+- **이 레포 스크립트(sync_notion·generate_tts·sync_imagematching)는 아직 시트 표적 그대로 — 정상 가동.** 2단계에서 표적을 Postgres로 전환 후 시트 폐선 예정(보류 중, San 0814). **그 전까지 시트 삭제·탭 구조 변경 금지.**
+- Streamlit 앱 폐기 확인(San 0814) — 아래 ★app.py 명세는 레거시 보존 문서로 강등(학생 대면 정본 = kusukmap.com 웹앱).
+
 ## ⚠️ 교차 의존 (2026-06-22) — 이 공개 레포가 kusukmap-webapp 자산 소스가 됨
 - 이 레포(`github.com/sanslowli/Homework-Generation`, **public**)의 **이미지(`Syntax Pitching/.../*.png`)·음원(`audio/{챕터}/{pane}_{owner}.mp3`)**을, 이관 중인 통합 웹앱이 **jsDelivr CDN**(`cdn.jsdelivr.net/gh/sanslowli/Homework-Generation@main/<경로>`)으로 직접 끌어 씀(R2 업로드 대신). → **레포를 private 전환하거나 자산 폴더 경로·파일명 규칙을 바꾸면 웹앱 피칭 화면이 깨짐.** 변경 시 `kusukmap-webapp` 경로 매핑과 함께 손봐야 함.
 - 보안 OK: `service_key.json`·`openai_key.txt`는 `.gitignore`라 미커밋(공개돼도 키 노출 없음). 공개 자산 = 교재 이미지·레퍼런스 TTS뿐(학생 본인 녹음 아님).
