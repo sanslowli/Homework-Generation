@@ -73,6 +73,8 @@ jobs:
       - name: 🔄 Sync Notion to SentenceBank
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python sync_notion.py
 
       # ─── 2단계: SentenceBank → TTS mp3 생성 ───

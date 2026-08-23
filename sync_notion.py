@@ -36,6 +36,8 @@ import requests
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
+import supa  # Supabase 이중 쓰기(시트 2단계, 0822) — 미설정이면 조용히 건너뜀
+
 
 # ─── 설정 ───
 NOTION_VERSION = "2025-09-03"  # data sources API 지원 버전
@@ -331,6 +333,40 @@ def write_to_sheet(rows: list) -> None:
             "잔여 행 정리",
         )
     log.info("📤 SentenceBank 시트에 헤더 + %d행 기록 완료", len(rows))
+    mirror_to_supabase(rows)
+
+
+def mirror_to_supabase(rows: list) -> None:
+    """SentenceBank를 Supabase(sentence_bank)에도 반영 — 시트 2단계(2026-08-22).
+
+    웹앱이 이 테이블에서 정답·구간 매핑을 읽는다. 시트는 되돌리기용으로 계속 쓴다(이중 쓰기).
+    ★ 순서 = 전 행 upsert → **성공했을 때만** 이번에 쓴 챕터의 옛 행 정리.
+      '지우고 다시 넣기'는 금지(0801 전멸 사고 경로).
+    """
+    batch_iso = datetime.now(KST).isoformat()
+    payload, chapters = [], set()
+    for r in rows:
+        chapter = str(r[0]).strip()
+        pane = str(r[1]).strip()
+        owner = str(r[2]).strip()
+        if not chapter or not pane or not owner:
+            continue
+        chapters.add(chapter)
+        payload.append({
+            "chapter": chapter,
+            "pane": pane,
+            "owner": owner,
+            "section": str(r[3]).strip(),
+            "sentence": r[4],
+            "updated_at": batch_iso,
+        })
+    if not payload:
+        return
+    done = supa.upsert("sentence_bank", "chapter,pane,owner", payload, "정답 문장")
+    if done == len(payload):
+        supa.prune_stale("sentence_bank", "chapter", chapters, batch_iso, "SentenceBank")
+    else:
+        log.warning("⚠️ Supabase upsert가 일부만 성공(%d/%d) — 옛 행 정리는 건너뜁니다.", done, len(payload))
 
 
 # ─── 메인 ───

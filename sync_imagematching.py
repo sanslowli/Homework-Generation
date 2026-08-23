@@ -24,6 +24,8 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timezone, timedelta
 
+import supa  # Supabase 이중 쓰기(시트 2단계, 0822) — 미설정이면 조용히 건너뜀
+
 SHEET_NAME = "Syntax Pitching DB"
 TAB = "ImageMatching"
 HEADER = ["ImageStudent", "Chapter", "Image", "ContentOwner", "Updated"]
@@ -34,6 +36,15 @@ IMG_EXTS = (".png", ".jpg", ".jpeg")
 
 def kst_now():
     return datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def kst_iso(s):
+    """시트 Updated("2026-08-22 09:30:00") → ISO(+09:00). 형식이 아니면 지금 시각."""
+    s = (s or "").strip()
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?", s)
+    if not m:
+        return datetime.now(timezone(timedelta(hours=9))).isoformat()
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}T{m.group(4)}:{m.group(5)}:{m.group(6) or '00'}+09:00"
 
 
 def with_retry(fn, what, tries=5, base_delay=10.0):
@@ -168,6 +179,28 @@ def main():
 
     print(f"ImageMatching sync: {updated} updated, {appended} appended, "
           f"total {len(rows)} rows (named files: {len(found)})")
+
+    # ── Supabase 이중 쓰기(시트 2단계, 2026-08-22) ──
+    #   웹앱이 image_matching 테이블에서 읽는다. 시트 쓰기가 끝난 뒤 같은 내용을 DB에도 upsert.
+    #   ★ 이번에 파일명으로 발견한 것(found)만이 아니라 **시트 최종 상태 전량**을 보낸다 —
+    #     앱이 시트에 직접 쓴 담기까지 DB에 반영돼야 두 원장이 벌어지지 않는다.
+    #   ★ 삭제는 하지 않는다(이 스크립트의 원래 원칙 그대로 — upsert만).
+    mirror = []
+    for r in rows:
+        student = (r[0] if len(r) > 0 else "").strip()
+        chapter = (r[1] if len(r) > 1 else "").strip()
+        image = canon((r[2] if len(r) > 2 else "").strip())
+        if not student or not chapter or not image:
+            continue
+        mirror.append({
+            "student": student,
+            "chapter": chapter,
+            "image_key": image,
+            "set_key": (r[5].strip() if len(r) > 5 and r[5] else ""),
+            "content_owner": (r[3] if len(r) > 3 else "").strip(),
+            "updated_at": kst_iso(r[4] if len(r) > 4 else ""),
+        })
+    supa.upsert("image_matching", "student,chapter,image_key,set_key", mirror, "그림 매칭")
 
 
 if __name__ == "__main__":

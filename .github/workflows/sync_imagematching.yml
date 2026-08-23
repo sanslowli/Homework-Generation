@@ -6,6 +6,7 @@ name: Sync filenames → ImageMatching
 #
 # 필요 secret:
 #   GCP_SERVICE_KEY_JSON — 구글 서비스 계정 키(JSON). 다른 sync 워크플로와 동일.
+#   SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY — 시트 2단계(0822) 이중 쓰기. 없으면 시트만 쓰고 넘어감.
 
 on:
   push:
@@ -46,6 +47,9 @@ jobs:
         run: printf '%s' "$GCP_SERVICE_KEY_JSON" > service_key.json
 
       - name: Run sync_imagematching.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python sync_imagematching.py
 
       - name: Clean up secret files

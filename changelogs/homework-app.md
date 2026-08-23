@@ -26,6 +26,7 @@
 ## 🔄 교차 의존 갱신 (2026-08-14) — 웹앱 백엔드 시트 → Supabase 이전 1단계
 - **웹앱 핫패스(통과·딜·게임로그·피칭기록·출석 등)가 구글 시트를 떠남**(kusukmap-webapp 0814, Supabase Postgres 서울). ⟹ 0801에 기록한 "웹앱과 이 레포가 같은 서비스 계정 분당 쿼터를 공유 — 한쪽 폭주가 다른 쪽을 죽인다" 교차 사고는 **사실상 소멸**(웹앱의 시트 읽기 = ImageMatching·SentenceBank 캐시 조회만 잔존).
 - **이 레포 스크립트(sync_notion·generate_tts·sync_imagematching)는 아직 시트 표적 그대로 — 정상 가동.** 2단계에서 표적을 Postgres로 전환 후 시트 폐선 예정(보류 중, San 0814). **그 전까지 시트 삭제·탭 구조 변경 금지.**
+- **★ 2026-08-22 후속(시트 2단계 착수, San "통짜로")**: 웹앱이 ImageMatching·SentenceBank를 **Supabase에서 읽도록** 바뀜(시트 폴백 유지). 이 레포는 **시트에 쓰던 그대로 두고 DB에도 같이 upsert**(`supa.py` 신설 — 표준 라이브러리만, 새 의존성 0). `sync_imagematching`은 시트 최종 상태 전량을 미러(앱이 직접 쓴 담기까지 포함), `sync_notion`은 upsert 전량 성공 시에만 **이번에 쓴 챕터 안에서** 옛 행 정리(★'지우고 다시 넣기' 금지 — 0801 전멸 사고 경로). GitHub secret `SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY` 필요, **없으면 조용히 건너뛰어 종전과 동일 동작**. 세 워크플로(sync_notion·sync_and_tts·sync_imagematching)에 env 배선 완료. **시트는 여전히 삭제 금지**(폴백·되돌리기 창).
 - Streamlit 앱 폐기 확인(San 0814) — 아래 ★app.py 명세는 레거시 보존 문서로 강등(학생 대면 정본 = kusukmap.com 웹앱).
 
 ## ⚠️ 교차 의존 (2026-06-22) — 이 공개 레포가 kusukmap-webapp 자산 소스가 됨
