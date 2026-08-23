@@ -104,6 +104,19 @@ def upsert(table, on_conflict, rows, label=""):
     if not rows:
         return 0
 
+    # ★ 배치 안 중복 키 제거(2026-08-22 실전 실패 수리) — 한 번의 upsert에 같은 키가 두 번 들어가면
+    #   Postgres가 통째로 거부한다("ON CONFLICT DO UPDATE command cannot affect row a second time", 21000).
+    #   시트엔 같은 칸이 두 줄로 남아 있을 수 있어(정규화 전 파일명 '1-3박대호.png' + 정규화 후 '1-3.png')
+    #   실제로 터졌다. 규칙 = **뒤 행 승**(시트 읽기 규약과 동일 — 나중에 쓴 것이 최신).
+    keys = [k.strip() for k in on_conflict.split(",") if k.strip()]
+    if keys:
+        dedup = {}
+        for r in rows:
+            dedup[tuple(str(r.get(k, "")) for k in keys)] = r
+        if len(dedup) != len(rows):
+            print(f"ℹ️ 배치 내 중복 키 {len(rows) - len(dedup)}건 정리(뒤 행 승) — {table}")
+        rows = list(dedup.values())
+
     done = 0
     for i in range(0, len(rows), CHUNK):
         part = rows[i : i + CHUNK]
