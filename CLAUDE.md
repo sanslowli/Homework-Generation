@@ -59,7 +59,8 @@ Syntax Bingo 수업은 수강생이 필연적으로 **자기 손그림 + 문장*
 - **Streamlit**(`app.py` ~2200줄) → Streamlit Community Cloud 배포. 녹음 = 브라우저 MediaRecorder(서버 송신 0).
 - **Google Sheets** = `Syntax Pitching DB`: 탭 `ImageMatching`(보드 slot→ContentOwner)·`SentenceBank`(정답·구간·음원 lookup)·피칭 기록.
 - **노션** = `SYNTAX INDEX`(구문 마스터)·예문 DB·빙고판(챕터) DB·수강증 DB. `sync_notion.py`가 노션→SentenceBank 동기화.
-- **GitHub Actions** = 정기 sync + TTS(`generate_tts.py`/`.yml`), 이미지 매칭 동기화(`sync_imagematching.py`/`.yml`). **Make.com** = 노션 버튼→GitHub 웹훅 미들웨어.
+- **GitHub Actions** = 정기 sync + TTS(`generate_tts.py`/`.yml`), 이미지 매칭 동기화(`sync_imagematching.py`/`.yml`). ~~**Make.com** = 노션 버튼→GitHub 웹훅 미들웨어~~ → **폐선 가능(2026-08-24)**: TTS 실행 트리거가 **웹앱 게임 방의 빨간 ♪**로 이관(딜러가 음원 없음을 깨닫는 자리에서 바로 실행 — `/api/teacher/tts-run`이 GitHub workflow_dispatch를 직접 호출). 노션 버튼·웹훅은 병존해도 무해.
+- **Supabase 이중 쓰기(0822)** — sync 스크립트가 시트에 쓴 뒤 같은 내용을 DB에도 upsert(`supa.py`). secret = `SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`(GitHub Actions), 미설정이면 조용히 건너뜀. ★'전부 지우고 다시 넣기' 금지(0801 전멸 경로) — upsert 후 *이번에 쓴 챕터 안에서만* 옛 행 정리.
 - **TTS 파이프라인**: SentenceBank → 정답 음성 생성 → `audio/{챕터}/...`.
 
 ### 데이터 소스 지도 (권위 원본)
@@ -68,8 +69,8 @@ Syntax Bingo 수업은 수강생이 필연적으로 **자기 손그림 + 문장*
 | 예문 DB(노션) | `{챕터}@{이름}` / `{챕터}S@{이름}` | 학생별·챕터별 문장(속성 `1`~`16`) |
 | 빙고판(챕터) DB(노션) | `602(S)` | 구간 경계(`구간N 시작칸/끝칸`)·교재 PDF. 구간↔#번호 원본 |
 | 수강증 DB(노션) | 제목=본명·`레벨`·`반`·`상태` | 명단·레벨·반 편성 |
-| ImageMatching(Sheet) | `ImageStudent,Chapter,Image,ContentOwner,Updated` | 보드 (구간-slot)→누구 콘텐츠 |
-| SentenceBank(Sheet) | `sync_notion.py` 동기화 | 정답·구간 매핑·음원 lookup |
+| ImageMatching → **Supabase `image_matching`**(0822) | `student,chapter,image_key,set_key,content_owner` | 보드 (구간-slot)→누구 콘텐츠. **웹앱 정본 = DB**, 시트는 이중 쓰기 사본·폴백. `image_key`는 `{구간}-{슬롯}.png`로 **정규화 필수**(접미사 파일명 혼재 시 한 칸 두 행 → 옛 주인 부활, 0822 실사고) |
+| SentenceBank → **Supabase `sentence_bank`**(0822) | `chapter,pane,owner,sentence,section` | 정답·구간 매핑. 웹앱 정본 = DB, 시트는 사본·폴백(**`generate_tts.py`는 아직 시트를 읽는다** — TTS 파이프라인 무변) |
 
 **예문 마크업**: `<span color="green/red/blue/gray">`(색)·`<br>` 뒤 회색=첨삭메모·인라인 `**굵게** *기울임* ~~취소선~~ \`코드\``. 렌더 시 변환 필요. **레벨 다르면 같은 #번호라도 다른 콘텐츠**(병합 금지, '담은 사람' 룰).
 
