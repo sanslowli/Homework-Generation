@@ -2,7 +2,7 @@
 
 너의 이름은 **SyntaxPitching Engineering**이다 (San이 다른 호명을 쓰면 따른다). San과 단둘이 대화한다.
 
-이 폴더(`Homework-Generation/`)는 **쿠숙반(@kusukban) Syntax Bingo™ 수강생 자가복습 웹앱**(Streamlit)의 코드·운영 자산 부서다. 운영 도메인 `syntax-pitching.streamlit.app`.
+이 폴더(`Homework-Generation/`)는 쿠숙반 **학습 자산의 창고이자 파이프라인 부서**다 — 학생 손그림·음원과 그것을 노션·Supabase에 잇는 동기화 스크립트(Actions). ⛔ 구 정체성이던 **Streamlit 자가복습 앱은 0814에 폐기**됐고(학생 대면 = `kusukmap.com` 단독), `app.py`류는 **레거시 보존물**이다 — 아래 어느 줄도 그걸 현역으로 읽지 말 것.
 
 > **★ Streamlit 앱 폐기 확인(San 2026-08-14).** 학생 대면은 kusukmap.com 웹앱 단독. 이 폴더의 현역 = **자산(그림·audio)·파이프라인(sync·TTS Actions)** — `app.py`류는 레거시 보존물. 웹앱 백엔드가 시트→Supabase로 이전 중(0814 핫패스 완료)이라, 이 레포 스크립트의 시트 표적도 2단계에서 전환 예정(`changelogs/homework-app.md` 0814 노트).
 
@@ -49,7 +49,7 @@ Syntax Bingo 수업은 수강생이 필연적으로 **자기 손그림 + 문장*
 
 ## 3. 기술 스택·외부 시스템
 
-- **Streamlit**(`app.py` ~2200줄) → Streamlit Community Cloud 배포. 녹음 = 브라우저 MediaRecorder(서버 송신 0).
+- ~~Streamlit(`app.py`) → Community Cloud 배포~~ = **폐기(0814)**. 현역 = **Actions 파이프라인**(`sync_notion.py`·`sync_imagematching.py`·`generate_tts.py`) + 자산 저장소. 학생 대면·녹음은 웹앱이 진다.
 - **Google Sheets** = `Syntax Pitching DB`: 탭 `ImageMatching`(보드 slot→ContentOwner)·`SentenceBank`(정답·구간·음원 lookup)·피칭 기록.
 - **노션** = `SYNTAX INDEX`(구문 마스터)·예문 DB·빙고판(챕터) DB·수강증 DB. `sync_notion.py`가 노션→SentenceBank 동기화.
 - **GitHub Actions** = 정기 sync + TTS(`generate_tts.py`/`.yml`), 이미지 매칭 동기화(`sync_imagematching.py`/`.yml`). ~~**Make.com** = 노션 버튼→GitHub 웹훅 미들웨어~~ → **폐선 가능(2026-08-24)**: TTS 실행 트리거가 **웹앱 게임 방의 빨간 ♪**로 이관. 노션 버튼·웹훅은 병존해도 무해.
@@ -76,7 +76,7 @@ Syntax Bingo 수업은 수강생이 필연적으로 **자기 손그림 + 문장*
 | `릴스용` | 인스타 릴스용 출력 |
 | `보관 폴더` | 휴면·종료 수강생 그림 |
 | `*.app`(Syntax Pitching™·전체 숙제 생성) | Mac 더블클릭 런처 |
-| `백업 *.py` · `app (backup).py` · `syntax_pitching *.py` | 구버전 백업(현행 = `app.py`) |
+| `app.py` · `백업 *.py` · `app (backup).py` · `syntax_pitching *.py` | **전부 레거시 보존물**(0814 폐기). 돌지 않고, 고칠 일도 없다 |
 | `Generate Homework All.py` · `generate_tts.py` · `sync_notion.py` · `sync_imagematching.py` · `backfill_image_filenames.py` | 배치·동기화 스크립트 |
 | `{모드}/{학생}/{학생}_{prev}+{next}_당일판.pdf`·`.png` | **동적 빙고판 중간다리 산출물**(2026-08-28 신설). 직전 챕터의 앞쪽 열을 버려 뒤로 밀고, 남은 자리에 **오늘 진도(새 챕터)의 드로잉 템플릿**을 끼운 10열 당일판. 예 = 고은석 `604S+605`(604S 뒤 8열 + 605 앞 2열, 우측 하단 2열이 오늘 그릴 칸). 공정 = `~/Kusuk HQ/kusukban/🗃️ 교재/_auto-generator/rebuild_hybrid.py`. 재인쇄와 다른 점 = **번호행을 새로 조판**하고(열 구성이 바뀌므로 교재 격자를 못 물려받음) **스트립을 칸 단위로 쪼개 앉힌다**(구간이 상·하단 접힘을 가로지를 수 있음). 칸 경계는 세로 점선으로 스냅 — 균등 분할만 하면 스캔 크롭 오차로 좁은 조각이 낀다(0828 실측) |
 | `{모드}/{학생}/{현행\|지난}/{챕터}/cells/{구간-슬롯}{주인}__{i}.webp` | **칸(타일) 파생본**(2026-09-01 신설). 띠 스트립을 균등 분할한 칸 단위 이미지 — 게임방 타일 렌더·인쇄가 읽는다. **띠 원본은 보존**(재단이 틀렸을 때 돌아갈 자리). 원장 무변경(칸은 띠에서 주인 상속). 거처가 챕터 폴더 *안*인 이유 = 현행→지난 자동 정리에 공짜로 따라가려고. 공정·규약 정본 = `../kusukmap-webapp/docs/game-canon.md` 스캔→저장 절. 잘림 재스캔 대기열 = 루트 `재스캔-대기열.md`(0901 전수조사 23건) |
@@ -88,10 +88,9 @@ Syntax Bingo 수업은 수강생이 필연적으로 **자기 손그림 + 문장*
 
 ## 6. 작업 방식 — vibe coding
 
-- San이 자연어로 *"이거 이렇게 해줘"* → 너가 코드 작성·수정. 로컬 `streamlit run app.py` 테스트 → git push → Streamlit Cloud 자동 배포.
+- San이 자연어로 *"이거 이렇게 해줘"* → 너가 코드 작성·수정 → git push. **배포랄 게 없다** — 스크립트는 push가 Actions를 돌리고, 자산은 push가 곧 반영이다(jsDelivr).
 - **작은 변경 매번 보고 X.** 큰 변경(기능 추가·구조 변경)은 한 줄 요약 + 검증. 막힘·결정 필요는 명확히 질문.
-- **변경 후 `changelogs/homework-app.md` 2중 갱신(필수):** ① 새 version 항목(변경/의도/수강생효과) **+** ② 그 변경이 기능·플로우·알고리즘·데이터 경로를 바꿨으면 상단 **★ app.py 전체 명세(A~G)**의 해당 부분도 같이 수정 + "마지막 정독" 날짜 갱신. 변경이력은 *무엇이 바뀌었나*, 명세는 *지금 무엇인가* — **둘이 어긋나면 다음 세션이 거짓 명세를 읽는다(드리프트).** 코드만 고치고 명세를 안 고치는 것 = 금지.
-- 명세가 코드와 맞는지 의심되면 app.py를 on-demand 정독해 명세를 재동기화(이 앱은 무거워 시작 정독엔 안 넣음 — 개념은 명세 md가, 구현은 호명 시 코드가).
+- ⛔ ~~변경 후 `changelogs/homework-app.md` 2중 갱신(필수) + `app.py` 전체 명세 재동기화~~ = **폐기(0907)** — 죽은 앱(0814 폐기)에 걸려 있던 의무다. 파이프라인 스크립트를 고쳤으면 **웹앱 쪽 changelog**(`../kusukmap-webapp/changelogs/kusukmap-webapp.md`)에 적는다 — 그게 이 스크립트들의 소비자가 사는 곳이다.
 
 ## 7. 용어
 
