@@ -92,6 +92,45 @@ def prune_stale(table, chapter_col, chapters, batch_iso, label=""):
         return 0
 
 
+def select_all(table, select="*", order=None, label=""):
+    """table 전량을 dict 리스트로 읽는다. **없거나 못 읽으면 예외** — 빈 목록으로 눙치지 않는다.
+
+    ★ PostgREST는 한 번에 **1000행**까지만 준다. 순진하게 한 번 읽으면 그 이상은 **조용히 빠지고**
+      호출부는 "그만큼이 전부"로 안다(웹앱이 0814에 같은 자리에서 데였다 — `src/lib/db.ts`).
+      그래서 Range 헤더로 페이지를 넘겨 끝까지 읽는다.
+    ★ `order`는 **안정 정렬용이자 필수**다. 정렬이 없으면 페이지 경계에서 행이 겹치거나 빠진다.
+      자연키를 그대로 준다(예: sentence_bank = "chapter,pane,owner").
+    """
+    url, key = _env()
+    if not url or not key:
+        raise RuntimeError(
+            f"Supabase 미설정({label or table}) — SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY가 필요하다. "
+            "워크플로 run 단계의 env를 확인할 것."
+        )
+    q = f"select={urllib.parse.quote(select)}"
+    if order:
+        q += f"&order={urllib.parse.quote(order)}"
+    out, start = [], 0
+    while True:
+        req = urllib.request.Request(
+            f"{url}/rest/v1/{table}?{q}",
+            method="GET",
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+                "Range-Unit": "items",
+                "Range": f"{start}-{start + CHUNK - 1}",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=60) as res:
+            page = json.loads(res.read().decode("utf-8"))
+        out += page
+        if len(page) < CHUNK:
+            break
+        start += CHUNK
+    return out
+
+
 def upsert(table, on_conflict, rows, label=""):
     """rows(dict 리스트)를 table에 upsert. 성공 행 수 반환(건너뛰면 0).
 

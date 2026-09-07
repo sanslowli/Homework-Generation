@@ -60,6 +60,9 @@ jobs:
           printf '%s' "$OPENAI_API_KEY" > openai_key.txt
 
       - name: Run generate_tts.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           ARGS="--yes"
           if [ -n "${{ inputs.chapter }}" ]; then

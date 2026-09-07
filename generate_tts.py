@@ -17,7 +17,7 @@ generate_tts.py — SentenceBank 기준으로 OpenAI TTS mp3 파일 생성
      --speed 1.0      재생 속도 (기본: 1.0)
 
 [동작]
-- Google Sheet 의 SentenceBank 시트를 읽어옴 (sync_notion.py로 채워진 데이터)
+- Supabase `sentence_bank` 를 읽어옴 (sync_notion.py로 채워진 데이터 · 구 SentenceBank 시트, 0907 이전)
 - 각 행 (Chapter, Pane, Owner, Sentence) 에 대해:
     audio/{Chapter}/{Pane}_{Owner}.mp3 + audio/{Chapter}/{Pane}_{Owner}.txt 페어 확인
     - mp3 없음                           → 생성
@@ -36,8 +36,7 @@ import os
 import sys
 import time
 import argparse
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import supa  # 읽기원 = Supabase(2026-09-07 시트 폐선 1단계)
 from pathlib import Path
 
 # OpenAI SDK
@@ -49,11 +48,8 @@ except ImportError:
     sys.exit(1)
 
 
-SHEET_NAME = "Syntax Pitching DB"
-SENTENCE_BANK_TAB = "SentenceBank"
 BASE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 AUDIO_ROOT = os.path.join(BASE_FOLDER, "audio")
-SERVICE_KEY_PATH = os.path.join(BASE_FOLDER, "service_key.json")
 OPENAI_KEY_PATH = os.path.join(BASE_FOLDER, "openai_key.txt")
 
 
@@ -68,44 +64,31 @@ def load_openai_key():
     return ""
 
 
-def get_sheet_client():
-    """로컬 service_key.json 으로 인증."""
-    if not os.path.exists(SERVICE_KEY_PATH):
-        print(f"❌ service_key.json 을 찾을 수 없습니다: {SERVICE_KEY_PATH}")
-        sys.exit(1)
-    scope = [
-        'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/drive',
+
+
+
+
+def load_sentence_bank_rows():
+    """SentenceBank 전량을 dict 리스트로. **읽기원 = Supabase**(2026-09-07 시트 폐선 1단계).
+
+    ★ 반환 키는 **시트 시절 그대로**(`Chapter`/`Pane`/`Owner`/`Sentence`)다 — 아래 공정을 안 건드리려고
+      여기서만 이름을 옮긴다. 시트를 다시 볼 일은 없다.
+    ★ 못 읽으면 **소리 내어 죽는다**(`supa.select_all`이 예외). 조용히 0행으로 넘어가면 그날 음원이
+      통째로 안 생기고 아무도 모른다 — 매일 04:30에 도는 경로라 그게 제일 나쁘다.
+    """
+    rows = supa.select_all(
+        "sentence_bank", "chapter,pane,owner,sentence", "chapter,pane,owner", "정답 문장"
+    )
+    return [
+        {
+            "Chapter": r.get("chapter", ""),
+            "Pane": r.get("pane", ""),
+            "Owner": r.get("owner", ""),
+            "Sentence": r.get("sentence", ""),
+        }
+        for r in rows
     ]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(SERVICE_KEY_PATH, scope)
-    return gspread.authorize(creds)
 
-
-def with_retry(fn, what, tries=5, base_delay=10.0):
-    """구글 API 5xx·429(쿼터) 지수 백오프 재시도 (2026-08-01 — sync_notion.with_retry와 같은 규약).
-    429는 4xx지만 '분당 쿼터 붐빔'이라 기다리면 풀리는 일시 장애 — 웹앱이 잠깐 쿼터를 태운 순간
-    파이프라인이 통째로 죽던 사고(#93) 방어. 그 외 4xx(권한·잘못된 요청)는 즉시 raise."""
-    for attempt in range(1, tries + 1):
-        try:
-            return fn()
-        except gspread.exceptions.APIError as e:
-            status = getattr(getattr(e, "response", None), "status_code", None)
-            retryable = status is not None and (status >= 500 or status == 429)
-            if not retryable or attempt == tries:
-                raise
-            delay = base_delay * (2 ** (attempt - 1))
-            print(f"⚠️ 구글 API {status} ({what}) — {attempt}/{tries}회, {delay:.0f}초 후 재시도")
-            time.sleep(delay)
-
-
-def load_sentence_bank_rows(client):
-    """SentenceBank 시트의 모든 행을 dict 리스트로 반환."""
-    try:
-        ws = with_retry(lambda: client.open(SHEET_NAME).worksheet(SENTENCE_BANK_TAB), "시트 열기")
-    except gspread.exceptions.WorksheetNotFound:
-        print(f"❌ '{SENTENCE_BANK_TAB}' 시트가 없습니다. 먼저 sync_notion.py로 동기화하세요.")
-        sys.exit(1)
-    return with_retry(lambda: ws.get_all_records(), "본문 읽기")
 
 
 def get_audio_path(chapter, pane, owner):
@@ -177,10 +160,9 @@ def main():
         sys.exit(1)
     openai_client = OpenAI(api_key=api_key)
 
-    # 시트 로드
-    print("📊 SentenceBank 시트 로드 중...")
-    client = get_sheet_client()
-    rows = load_sentence_bank_rows(client)
+    # SentenceBank 로드(Supabase)
+    print("📊 SentenceBank 로드 중(Supabase)...")
+    rows = load_sentence_bank_rows()
     print(f"   총 {len(rows)} 행 발견")
 
     # 챕터 필터

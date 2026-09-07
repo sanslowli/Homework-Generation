@@ -79,6 +79,9 @@ jobs:
 
       # ─── 2단계: SentenceBank → TTS mp3 생성 ───
       - name: 🎙️ Generate TTS audio
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           ARGS="--yes"
           if [ -n "${{ inputs.chapter }}" ]; then
