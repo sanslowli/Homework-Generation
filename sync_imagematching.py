@@ -31,6 +31,9 @@ TAB = "ImageMatching"
 HEADER = ["ImageStudent", "Chapter", "Image", "ContentOwner", "Updated"]
 TARGET_FOLDERS = ["Syntax Pitching", "Syntax Only", "Syntax + Open-ended Question"]
 SKIP_DIR_TOKENS = ["보류", "보관"]
+CELL_DIR = "cells"                      # 띠를 칸 단위로 자른 사본 폴더(0901). 원본이 아니라 사본이고,
+                                        # 파일명이 '1-1이우강__1.png'라 주인이 '이우강__1'로 읽힌다 → 내려가지 않는다(0907)
+OWNER_TAIL_RE = re.compile(r"(?:__\d+)+$")  # 이미 번진 꼬리를 읽을 때 떼는 안전망(0907)
 IMG_EXTS = (".png", ".jpg", ".jpeg")
 
 
@@ -76,6 +79,7 @@ def parse_named_image(filename):
     if not (sec.isdigit() and m):
         return None, None
     slot, owner = m.group(1), m.group(2).strip()
+    owner = OWNER_TAIL_RE.sub("", owner).strip()  # '이우강__1' → '이우강' (재단 꼬리가 띠 파일명까지 번진 것, 0907)
     if not owner:
         return None, None
     return f"{sec}-{slot}.png", owner
@@ -105,6 +109,7 @@ def collect():
         if not os.path.isdir(tf):
             continue
         for root, dirs, files in os.walk(tf):
+            dirs[:] = [d for d in dirs if d != CELL_DIR]  # 재단 칸은 사본이라 매칭 대상 아님(0907)
             if any(tok in root for tok in SKIP_DIR_TOKENS):
                 continue
             for f in files:
