@@ -4,7 +4,7 @@
 
 이 폴더(`Homework-Generation/`)는 쿠숙반 **학습 자산의 창고이자 파이프라인 부서**다 — 학생 손그림·음원과 그것을 노션·Supabase에 잇는 동기화 스크립트(Actions). ⛔ 구 정체성이던 **Streamlit 자가복습 앱은 0814에 폐기**됐고(학생 대면 = `kusukmap.com` 단독), `app.py`류는 **레거시 보존물**이다 — 아래 어느 줄도 그걸 현역으로 읽지 말 것.
 
-> **★ Streamlit 앱 폐기 확인(San 2026-08-14).** 학생 대면은 kusukmap.com 웹앱 단독. 이 폴더의 현역 = **자산(그림·audio)·파이프라인(sync·TTS Actions)** — `app.py`류는 레거시 보존물. 웹앱 백엔드가 시트→Supabase로 이전 중(0814 핫패스 완료)이라, 이 레포 스크립트의 시트 표적도 2단계에서 전환 예정(`changelogs/homework-app.md` 0814 노트).
+> **★ Streamlit 앱 폐기 확인(San 2026-08-14).** 학생 대면은 kusukmap.com 웹앱 단독. 이 폴더의 현역 = **자산(그림·audio)·파이프라인(sync·TTS Actions)** — `app.py`류는 레거시 보존물. 시트→Supabase 이전은 **0914에 끝났다** — 이 레포 스크립트의 표적은 전부 DB이고 구글 시트는 동결 백업(쓰기 0)이다(`changelogs/homework-app.md` 0914).
 
 > 이 문서는 코드 보면 아는 것(Streamlit·MediaRecorder·PIL 등 일반 기술)은 적지 않는다. **사람에게 듣지 않으면 알 수 없는** 비즈니스 컨텍스트·명명 규칙·도메인 룰만 담는다. 현재 기능·변경 이력·향후 과제(Next Steps)는 → **`changelogs/homework-app.md`**.
 
@@ -50,10 +50,10 @@ Syntax Bingo 수업은 수강생이 필연적으로 **자기 손그림 + 문장*
 ## 3. 기술 스택·외부 시스템
 
 - ~~Streamlit(`app.py`) → Community Cloud 배포~~ = **폐기(0814)**. 현역 = **Actions 파이프라인**(`sync_notion.py`·`sync_imagematching.py`·`generate_tts.py`) + 자산 저장소. 학생 대면·녹음은 웹앱이 진다.
-- **Google Sheets** = `Syntax Pitching DB`: 탭 `ImageMatching`(보드 slot→ContentOwner)·`SentenceBank`(정답·구간·음원 lookup)·피칭 기록.
-- **노션** = `SYNTAX INDEX`(구문 마스터)·예문 DB·빙고판(챕터) DB·수강증 DB. `sync_notion.py`가 노션→SentenceBank 동기화.
+- **Google Sheets** = `Syntax Pitching DB`: **동결 백업(2026-09-14 · 쓰기 0)**. 탭 `ImageMatching`·`SentenceBank`는 0914 시점 스냅샷으로 멈춰 있다 — 지우진 않았으나 낡는다. 아직 읽는 곳 = `backfill_image_filenames.py`(수동 1회성) 하나.
+- **노션** = `SYNTAX INDEX`(구문 마스터)·예문 DB·빙고판(챕터) DB·수강증 DB. `sync_notion.py`가 노션→Supabase `sentence_bank` 동기화.
 - **GitHub Actions** = 정기 sync + TTS(`generate_tts.py`/`.yml`), 이미지 매칭 동기화(`sync_imagematching.py`/`.yml`). ~~**Make.com** = 노션 버튼→GitHub 웹훅 미들웨어~~ → **폐선 가능(2026-08-24)**: TTS 실행 트리거가 **웹앱 게임 방의 빨간 ♪**로 이관. 노션 버튼·웹훅은 병존해도 무해.
-- **Supabase 이중 쓰기(0822)** — sync 스크립트가 시트에 쓴 뒤 같은 내용을 DB에도 upsert(`supa.py`). secret = `SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`(GitHub Actions), 미설정이면 조용히 건너뜀.
+- **Supabase 단독 쓰기(0914 · 구 이중 쓰기 0822)** — sync 둘이 `supa.py`로 DB에만 upsert한다. secret = `SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`(GitHub Actions). **미설정·부분 실패는 이제 exit 1** — 받아줄 시트가 없어 조용히 넘어가면 그 회차가 통째로 유실된다.
 - **TTS 파이프라인**: SentenceBank → 정답 음성 생성 → `audio/{챕터}/...`.
 
 > **★ 이 파이프라인이 *실제로 무엇을 하는가*의 정본 = `~/Kusuk HQ/kusukmap-webapp/docs/game-canon.md` 파이프라인 절**(2026-08-28 중복 회수). 그쪽이 스크립트 실측으로 더 두껍게 든다 — **승인 마커 게이트**(✅ 없는 칸은 SentenceBank에 안 들어감 ⟹ 🚧 칸은 정답도 음원도 없다) · **첨삭 색 = 입력 계약**(회색·배경색·취소선 제거) · **전멸 방지 3중 장치**(시트 clear 금지 / DB는 upsert만 / prune은 이번 챕터 안에서만) · env 미설정 시 조용히 건너뛰는 경로 · TTS 사이드카 변경 감지 · concurrency 단일 그룹.
@@ -64,7 +64,7 @@ Syntax Bingo 수업은 수강생이 필연적으로 **자기 손그림 + 문장*
 
 이 레포 작업 시 손에 들고 있어야 할 두 가지만 남긴다:
 
-- **`generate_tts.py`는 아직 Google Sheets를 읽는다**(DB 아님). ⟹ **시트를 폐선하면 음원 생성이 죽는다.** 폐선 전 선행 작업 = 읽기원을 `sentence_bank`로 이전. (game-canon 미상 대장에 등재됨.)
+- **시트 폐선 완료(1단계 0907 읽기원 이전·3단계 0907 웹앱 폴백 제거·2단계 0914 sync 쓰기 제거).** `generate_tts.py`·sync 둘 다 `sentence_bank`/`image_matching`만 본다. 되돌리기 창은 닫혔다 — 시트는 0914 스냅샷에서 멈춘 백업이라 복구용으로 믿지 말 것.
 - **예문 마크업**: `<span color="…">`(색)·`<br>` 뒤 회색=첨삭메모·인라인 `**굵게** *기울임* ~~취소선~~ \`코드\``. 렌더 시 변환 필요. **레벨 다르면 같은 #번호라도 다른 콘텐츠**(병합 금지, '담은 사람' 룰).
 
 ## 4. 폴더 안 자산
@@ -110,6 +110,7 @@ San이 의제 던지면 본론 바로. 매번 컨텍스트 복창 X. 도메인 �
 
 ## 변경 이력
 
+- **2026-09-14: 시트 폐선 2단계 — `sync_notion.py`·`sync_imagematching.py`의 구글 시트 쓰기 제거(DB 단독).** 워크플로 4종에서 `GCP_SERVICE_KEY_JSON` 주입·gspread 설치를 걷음. 남은 시트 소비자 = `backfill_image_filenames.py`(수동) 하나. 상세 = `changelogs/homework-app.md` 0914.
 - **2026-08-28(b): 당일판 산출물 등재** — `rebuild_hybrid.py`(동적 빙고판 중간다리)가 내는 `{학생}_{prev}+{next}_당일판.pdf`를 폴더 자산 표에 추가. 실전 1회 사용(고은석·이나진·이우강, 604+605).
 - **2026-08-28: 중복 회수 — 게임·수업 공통 어휘를 game-canon으로 접음(San 승인).** §2에서 판 40칸 구성·5XX/6XX 구분·심화/기초와 '담은 사람' 룰·구간 정의·파일 명명(좌표 체계)을 정본 포인터로 축소하고, **이 레포가 직접 쓰는 식별자·경로**만 남겼다. 데일리 3/5/10장·구간 안배는 정본으로 접고 **전환 이력만 잔류**. §3 데이터 소스 지도 표 전체를 접고 **`generate_tts.py`의 시트 의존**(시트 폐선의 마지막 사슬)과 예문 마크업만 남김. 남긴 고유 자산 = 출제 우선순위(정본에 없음)·커닝 페이퍼·오디오 위젯 3-Row·Safari unlock·빈 슬롯 규칙·보안 절·changelog 2중 갱신 규약·용어.
 - 2026-06-19: `DOMAIN.md` → `CLAUDE.md`로 재편(부서 지침화). Homework-Generation이 `~/Kusuk HQ/` 산하로 이관됨에 맞춰 정체성·본부 관계·바이브코딩 작업 방식·보안 주의 신설, 폴더 자산 추정 섹션을 실측으로 확정. 도메인 룰·명명 규칙·데이터 소스 지도는 기존 DOMAIN.md(2026-06-11·12)에서 보존. 현재 기능 베이스라인·Next Steps는 `changelogs/homework-app.md`로 분리.

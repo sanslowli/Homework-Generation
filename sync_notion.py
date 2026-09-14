@@ -1,12 +1,13 @@
 """
-sync_notion.py — Notion 예문 DB → Google Sheet SentenceBank 동기화
+sync_notion.py — Notion 예문 DB → Supabase `sentence_bank` 동기화
 
 [사용법]
     환경변수 설정 후 실행:
         export NOTION_TOKEN=ntn_...
+        export SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=...
         python sync_notion.py
 
-    또는 GitHub Actions에서 자동 실행 (NOTION_TOKEN secret 필요).
+    또는 GitHub Actions에서 자동 실행 (위 secret 3종 필요).
 
 [동작]
 1. 노션 빙고판(챕터) DB에서 챕터별 구간 매핑 가져옴 (601(S), 602(S), 603(S) 등)
@@ -16,12 +17,17 @@ sync_notion.py — Notion 예문 DB → Google Sheet SentenceBank 동기화
      - 회색(첨삭 주석), 취소선 부분 자동 제거
      - 빈 셀 skip
      - 챕터 매핑으로 section 결정
-5. SentenceBank 시트에 전체 교체 방식으로 기록
+5. Supabase `sentence_bank`에 upsert → 성공했을 때만 이번 챕터의 옛 행 정리
+
+[구글 시트 쓰기는 폐선(2026-09-14, 시트 폐선 2단계)]
+    0822에 웹앱 읽기가 DB로, 0907에 음원 생성 읽기원·웹앱 폴백이 닫히면서 시트는
+    쓰기만 남은 되돌리기 창이었다. 이제 **DB 단독**이고 시트는 동결 백업(쓰기 0).
+    ⟹ DB 쓰기가 실패하면 받아줄 곳이 없으므로 **소리 내어 죽는다**(exit 1).
 
 [필요 환경]
 - NOTION_TOKEN 환경변수 (노션 integration access token)
-- service_key.json (Google service account 키)
-- pip install requests gspread oauth2client
+- SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY 환경변수
+- pip install requests
 """
 
 import os
@@ -30,13 +36,10 @@ import sys
 import time
 import logging
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 
 import requests
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
-import supa  # Supabase 이중 쓰기(시트 2단계, 0822) — 미설정이면 조용히 건너뜀
+import supa  # 정본 원장 = Supabase(시트 폐선 2단계, 0914)
 
 
 # ─── 설정 ───
@@ -46,13 +49,7 @@ NOTION_API_BASE = "https://api.notion.com/v1"
 CHAPTER_DS_ID = "efb7798d-72c2-4b2a-bfa9-8161f5c5dc3f"   # 빙고판(챕터)
 SENTENCE_DS_ID = "1c31c5e2-fb57-80a4-a087-000b7b455705"  # 예문 DB
 
-SHEET_NAME = "Syntax Pitching DB"
-WORKSHEET_NAME = "SentenceBank"
-HEADERS_ROW = ["Chapter", "Pane", "Owner", "Section", "Sentence", "LastSyncedAt"]
-
 KST = timezone(timedelta(hours=9))
-SCRIPT_DIR = Path(__file__).resolve().parent
-SERVICE_KEY_PATH = SCRIPT_DIR / "service_key.json"
 
 MAX_PANES = 16                 # 예문 DB 컬럼 최대 1~16
 RATE_LIMIT_DELAY = 0.34        # 노션 API 3 req/sec 안전선
@@ -275,73 +272,15 @@ def extract_sentences(sentence_pages: list, chapter_mapping: dict) -> list:
     return rows
 
 
-# ─── 시트 기록 ───
-def with_retry(fn, what: str, tries: int = 5, base_delay: float = 10.0):
-    """구글 API 일시 장애 지수 백오프 재시도 — 2026-07-06 새벽 503 실사고 방어.
+# ─── DB 기록 ───
+def write_to_db(rows: list) -> None:
+    """SentenceBank를 Supabase(sentence_bank)에 기록 — 시트 폐선 2단계(2026-09-14).
 
-    재시도 대상 = 5xx(일시 장애) + ★429(쿼터 초과, 2026-08-01 추가).
-      429는 4xx지만 '지금 붐빔'이라 기다리면 풀리는 일시 장애다 — 종전엔 4xx로 뭉뚱그려 즉사시켜
-      웹앱이 분당 읽기 쿼터를 잠깐 태운 순간 파이프라인 전체가 죽었다(0801 실사고: TTS 워크플로 #93).
-      쿼터는 '분당' 창이라 10→20→40→80초 백오프면 대개 다음 창에서 통과. 4xx 나머지(권한·잘못된 요청)는 즉시 raise.
-    """
-    for attempt in range(1, tries + 1):
-        try:
-            return fn()
-        except gspread.exceptions.APIError as e:
-            status = getattr(getattr(e, "response", None), "status_code", None)
-            retryable = status is not None and (status >= 500 or status == 429)
-            if not retryable or attempt == tries:
-                raise
-            delay = base_delay * (2 ** (attempt - 1))
-            log.warning("⚠️ 구글 API %s (%s) — %d/%d회, %.0f초 후 재시도", status, what, attempt, tries, delay)
-            time.sleep(delay)
-
-
-def write_to_sheet(rows: list) -> None:
-    """SentenceBank 시트에 전체 교체 방식으로 기록.
-
-    ★ clear() 선행 금지(2026-07-06): '지우기 → 쓰기' 사이에 API가 죽으면 시트가 텅 빈 채 남아
-      피칭 정답·음원 lookup이 전부 죽는다. → 덮어쓰기 먼저, 남는 아래 행만 뒤에 정리.
-      어느 시점에 실패해도 시트에는 옛 데이터 또는 새 데이터가 항상 온전히 존재.
-    """
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive",
-    ]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(
-        str(SERVICE_KEY_PATH), scope
-    )
-    client = gspread.authorize(creds)
-    spreadsheet = with_retry(lambda: client.open(SHEET_NAME), "스프레드시트 열기")
-
-    def get_or_create_ws():
-        try:
-            return spreadsheet.worksheet(WORKSHEET_NAME)
-        except gspread.exceptions.WorksheetNotFound:
-            log.info("SentenceBank 시트가 없어 새로 만듭니다.")
-            return spreadsheet.add_worksheet(title=WORKSHEET_NAME, rows=2000, cols=10)
-
-    ws = with_retry(get_or_create_ws, "워크시트 조회")
-
-    values = [HEADERS_ROW] + rows
-    with_retry(lambda: ws.update("A1", values), "본문 덮어쓰기")
-    # 새 데이터가 옛 데이터보다 짧을 때 남는 아래 행 정리(범위 clear — 시트 전체 clear 아님).
-    old_rows = ws.row_count
-    if old_rows > len(values):
-        with_retry(
-            lambda: ws.batch_clear([f"A{len(values) + 1}:Z{old_rows}"]),
-            "잔여 행 정리",
-        )
-    log.info("📤 SentenceBank 시트에 헤더 + %d행 기록 완료", len(rows))
-    mirror_to_supabase(rows)
-
-
-def mirror_to_supabase(rows: list) -> None:
-    """SentenceBank를 Supabase(sentence_bank)에도 반영 — 시트 2단계(2026-08-22).
-
-    웹앱이 이 테이블에서 정답·구간 매핑을 읽는다. 시트는 되돌리기용으로 계속 쓴다(이중 쓰기).
+    웹앱과 음원 생성이 이 테이블에서 정답·구간 매핑을 읽는다. **여기가 유일한 쓰기**다.
     ★ 순서 = 전 행 upsert → **성공했을 때만** 이번에 쓴 챕터의 옛 행 정리.
       '지우고 다시 넣기'는 금지(0801 전멸 사고 경로).
+    ★ 전부 들어가지 못하면 exit 1. 시트 이중 쓰기가 있던 때는 부분 실패를 다음 회차가 따라잡았지만,
+      이제 받아줄 곳이 없어 조용한 부분 반영 = 조용한 데이터 유실이다(0907 '소리 내어 죽는다'와 같은 결).
     """
     batch_iso = datetime.now(KST).isoformat()
     payload, chapters = [], set()
@@ -361,12 +300,15 @@ def mirror_to_supabase(rows: list) -> None:
             "updated_at": batch_iso,
         })
     if not payload:
+        # 추출 0행 = 노션이 비었거나 못 읽은 것. 지우지 않고 그대로 둔다(전멸 방지).
+        log.warning("⚠️ 쓸 행이 0개 — DB는 손대지 않습니다(옛 데이터 보존).")
         return
     done = supa.upsert("sentence_bank", "chapter,pane,owner", payload, "정답 문장")
-    if done == len(payload):
-        supa.prune_stale("sentence_bank", "chapter", chapters, batch_iso, "SentenceBank")
-    else:
-        log.warning("⚠️ Supabase upsert가 일부만 성공(%d/%d) — 옛 행 정리는 건너뜁니다.", done, len(payload))
+    if done != len(payload):
+        log.error("❌ Supabase upsert가 일부만 성공(%d/%d) — 옛 행 정리를 건너뛰고 실패로 끝냅니다.", done, len(payload))
+        sys.exit(1)
+    log.info("📤 sentence_bank에 %d행 기록 완료", done)
+    supa.prune_stale("sentence_bank", "chapter", chapters, batch_iso, "SentenceBank")
 
 
 # ─── 메인 ───
@@ -384,10 +326,10 @@ def main():
     sentence_pages = query_data_source(SENTENCE_DS_ID)
     log.info("   → 예문 페이지 %d개 발견", len(sentence_pages))
 
-    log.info("3/3 데이터 정제 + SentenceBank 시트 기록...")
+    log.info("3/3 데이터 정제 + sentence_bank 기록...")
     rows = extract_sentences(sentence_pages, chapter_mapping)
     log.info("   → 추출된 문장: %d개", len(rows))
-    write_to_sheet(rows)
+    write_to_db(rows)
 
     log.info("✅ 동기화 완료")
 

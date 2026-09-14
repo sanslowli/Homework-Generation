@@ -8,11 +8,11 @@ name: Sync Notion + Generate TTS
 #   3. 매일 KST 04:30 자동 (안전망)
 #
 # 작업 순서:
-#   1) sync_notion.py 실행 → SentenceBank 시트 최신화
+#   1) sync_notion.py 실행 → Supabase sentence_bank 최신화
 #   2) generate_tts.py 실행 → 사이드카 비교로 변경된 문장만 mp3 재생성
 #   3) 새로 생성된 mp3 + .txt 자동 커밋·푸시
 #
-# 변경 없으면 mp3 안 만들고 시트만 갱신, 즉 매번 돌려도 안전·저비용.
+# 변경 없으면 mp3 안 만들고 DB만 갱신, 즉 매번 돌려도 안전·저비용.
 
 on:
   workflow_dispatch:           # 노션 버튼 + 수동
@@ -55,13 +55,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install requests gspread oauth2client openai
-
-      - name: Write service account key
-        env:
-          GCP_SERVICE_KEY_JSON: ${{ secrets.GCP_SERVICE_KEY_JSON }}
-        run: |
-          printf '%s' "$GCP_SERVICE_KEY_JSON" > service_key.json
+          pip install requests openai
 
       - name: Write OpenAI key file
         env:
@@ -69,15 +63,15 @@ jobs:
         run: |
           printf '%s' "$OPENAI_API_KEY" > openai_key.txt
 
-      # ─── 1단계: 노션 → SentenceBank 동기화 ───
-      - name: 🔄 Sync Notion to SentenceBank
+      # ─── 1단계: 노션 → sentence_bank 동기화 ───
+      - name: 🔄 Sync Notion to sentence_bank
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python sync_notion.py
 
-      # ─── 2단계: SentenceBank → TTS mp3 생성 ───
+      # ─── 2단계: sentence_bank → TTS mp3 생성 ───
       - name: 🎙️ Generate TTS audio
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -95,7 +89,7 @@ jobs:
       - name: Clean up secret files
         if: always()
         run: |
-          rm -f service_key.json openai_key.txt
+          rm -f openai_key.txt
 
       # ─── 3단계: 새 mp3·txt 자동 커밋·푸시 ───
       # ★ if: always() (2026-08-01) — TTS 일부 실패로 스텝이 빨개져도 *성공한 mp3는 커밋*한다.
@@ -133,7 +127,7 @@ jobs:
       - name: Summary
         run: |
           if [ "${{ steps.check_audio.outputs.has_changes }}" = "true" ]; then
-            echo "✅ 시트 동기화 + 변경된 문장 mp3 재생성 + 커밋 완료"
+            echo "✅ DB 동기화 + 변경된 문장 mp3 재생성 + 커밋 완료"
           else
-            echo "ℹ️ 시트 동기화 완료. 새로 만들거나 변경된 mp3 없음."
+            echo "ℹ️ DB 동기화 완료. 새로 만들거나 변경된 mp3 없음."
           fi

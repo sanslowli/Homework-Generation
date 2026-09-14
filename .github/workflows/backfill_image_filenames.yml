@@ -8,7 +8,8 @@ name: Backfill image filenames (수동)
 # 하는 일: ImageMatching 시트를 읽어, 매칭이 기록됐는데 파일명에 주인 이름이 없는
 #          그림을 '1-3.png → 1-3박대호.png' 로 소급 rename. (미매칭 파일은 그대로 둠)
 #
-# 필요 secret: GCP_SERVICE_KEY_JSON  (다른 sync 워크플로와 동일)
+# 필요 secret: GCP_SERVICE_KEY_JSON  (0914 시트 폐선 뒤 이 워크플로가 구글 시트를 쓰는 **유일한** 곳 —
+#              읽는 ImageMatching 탭은 그날부터 동결 백업이라, 돌리기 전에 시트가 최신인지 먼저 볼 것)
 
 on:
   workflow_dispatch:

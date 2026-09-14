@@ -13,6 +13,14 @@
 
 ---
 
+## 🔌 시트 폐선 2단계 — sync 둘의 구글 시트 쓰기 제거 (2026-09-14, San "시트 폐선도 끊어")
+- **변경**: ①`sync_notion.py` — SentenceBank 시트 쓰기(`write_to_sheet`·gspread·oauth2client·`service_key.json`·`with_retry`) 제거, `write_to_db()`가 Supabase `sentence_bank`에 upsert → 전량 성공 시에만 이번 챕터 옛 행 정리(0801 전멸 방지 규약 그대로) ②`sync_imagematching.py` — 시트 읽기(`get_all_values` 합치기 기준)·쓰기 제거. **파일명에서 발견한 것만** `image_matching`에 upsert(삭제 없음은 종전 그대로). 시트 행 비교 전용이던 `canon()`·`kst_iso()`·`with_retry()`도 함께 제거 ③**부분 실패·env 미설정 = exit 1**(종전엔 경고만 — 시트가 받아 줬으므로). 받아줄 곳이 사라져 조용한 부분 반영은 곧 유실이다 ④워크플로 4종(`sync_notion`·`sync_imagematching`·`sync_and_tts`·`generate_tts`)에서 `GCP_SERVICE_KEY_JSON` 주입 스텝·`service_key.json` 정리 스텝·`gspread oauth2client` 설치를 걷음. `sync_imagematching`은 표준 라이브러리만 쓰게 되어 pip 설치 스텝 자체가 사라짐.
+- **의도**: 0822에 웹앱 읽기가 DB로, 0907에 음원 생성 읽기원과 웹앱 폴백이 닫히면서 시트는 **쓰기만 남은 되돌리기 창**이었다. 실전 수업 한 번을 무사히 통과해(재개 트리거 충족) 마지막 칸을 끊는다. **DB 쓰기 경로는 종전과 동일** — 같은 테이블(`sentence_bank`·`image_matching`)·같은 충돌키(`chapter,pane,owner` / `student,chapter,image_key,set_key`)·같은 컬럼이라 스키마 변경 0.
+- **시트 소비자 잔여 = 1**. `backfill_image_filenames.py`(수동 워크플로, ImageMatching 탭 **읽기만**)만 남았다 — 읽는 탭이 0914부터 동결이라 돌리기 전에 최신성을 의심해야 한다. 그 워크플로만 `GCP_SERVICE_KEY_JSON`을 계속 쓰므로 secret·`requirements.txt`의 gspread·oauth2client는 **존치**(레거시 `app.py`류도 import는 들고 있다). **구글 시트 자체는 삭제하지 않는다 — 0914 스냅샷에서 멈춘 동결 백업.**
+- **웹앱 쪽은 아직 시트를 만진다**: `/api/pitch/match`가 담기를 DB에 쓴 뒤 ImageMatching 탭에도 그림자로 쓴다(실패는 삼킴). 이 레포 기준 쓰기는 0이지만 **시트 전체 기준 쓰기는 0이 아니다** — 그 그림자를 걷는 건 웹앱 판.
+- **검산**: `py_compile` 통과 · 두 스크립트에 시트 심볼 0(grep) · **gspread·oauth2client import를 차단한 채 모듈 적재 통과**(숨은 시트 의존이 있으면 그 자리에서 터진다) · 가짜 그림 트리로 `collect()`→upsert payload 실측(맨이름 제외·`cells/` 제외·`__1` 꼬리 제거·5단 세트 폴더 = 종전과 동일) · 워크플로 5종 YAML 파싱 + 걷은 secret을 참조하는 스텝 0. **실행은 하지 않음**(Actions·시트·DB 무변경).
+- **수강생 효과**: 없음(원장 내용 동일). 운영 효과 = 원장이 하나로 줄어 두 벌이 갈릴 자리가 사라지고, 동기화 실패가 초록으로 숨지 않는다.
+
 ## 🧨 sync_imagematching — 전멸 위험 제거 + 429 재시도 + 세트 폴더 대응 (2026-08-01)
 - **변경**: ①**`ws.clear()` 선행 폐지** — 종전 '전체 지우기 → 통째 쓰기'는 그 사이에 API가 죽으면(지금 실제로 나던 429!) **ImageMatching이 텅 빈 채 남아 전 학생 담기 정보가 증발**한다. sync_notion의 0706 규칙(덮어쓰기 먼저 → 남는 아래 행만 batch_clear) 이식 ②429·5xx 백오프 재시도(다른 스크립트와 같은 규약) ③**헤더 보존** — 고정 5칸 HEADER로 덮으면 웹앱이 0729에 추가한 F열 'Set' 이름이 사라져 세트 필터가 무력화됨 → 기존 헤더가 더 넓으면 그대로 유지 ④**세트 하위폴더 대응** — 경로를 '부모 폴더=챕터'가 아니라 위치(`{학생}/{현행·지난}/{챕터}/{세트}/{파일}`)로 파싱, 세트를 F열에 upsert(키도 세트 포함).
 - **의도**: 워크플로 #54·55·56(김영경 604S·김주성 604 스캔) 연속 실패 원인 = 같은 **429 읽기 쿼터**. 실패 지점이 `get_all_values()`라 시트는 무사했지만, 한 스텝 뒤(`clear()` 직후)에서 죽었다면 담기 전멸이었다 — 사고 직전이었음. 세트 대응은 웹앱 0729 변경과의 정합(안 하면 요일이 챕터로 기록돼 매칭이 어긋남).

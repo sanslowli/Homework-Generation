@@ -1,34 +1,36 @@
 """
-파일명 → ImageMatching 시트 동기화 (역방향).
+파일명 → Supabase `image_matching` 동기화 (역방향).
 
 선생님이 그림 파일을 '<섹션-슬롯><주인>.png' (예: 1-3박대호.png) 로 rename 해
-push 하면, 이 스크립트가 GitHub Actions 에서 돌면서 해당 매칭을 구글 시트
-"Syntax Pitching DB" 의 ImageMatching 탭에 upsert 한다.
+push 하면, 이 스크립트가 GitHub Actions 에서 돌면서 해당 매칭을 Supabase
+`image_matching` 테이블에 upsert 한다.
 
-규칙(앱 app.py 와 동일):
+규칙:
   경로 = {최상위}/{학생}/{현행·지난 챕터}/{챕터}/{섹션-슬롯[주인]}.png
-  ImageStudent = 학생 폴더명
-  Chapter      = 이미지의 부모 폴더명(챕터)
-  Image        = 정규화된 맨이름 '1-3.png'
-  ContentOwner = 파일명에 붙은 주인 이름
+  student       = 학생 폴더명
+  chapter       = 이미지의 챕터 폴더명
+  image_key     = 정규화된 맨이름 '1-3.png'
+  content_owner = 파일명에 붙은 주인 이름
 
 설계 원칙:
   - 주인 suffix 가 붙은 파일만 처리(= 매칭된 것). 맨이름(미매칭)은 무시.
-  - upsert 만 한다. 삭제는 하지 않는다 → 앱(gspread)이 직접 쓴 행을 보존.
-  - 따라서 앱이 쓴 매칭과 선생님이 파일명으로 넣은 매칭이 충돌 없이 공존.
+  - upsert 만 한다. 삭제는 하지 않는다 → 웹앱에서 학생이 직접 담은 행을 보존.
+  - 따라서 웹앱이 쓴 매칭과 선생님이 파일명으로 넣은 매칭이 충돌 없이 공존.
+
+[구글 시트 쓰기는 폐선(2026-09-14, 시트 폐선 2단계)]
+  종전엔 시트를 읽어 파일명 발견분과 합친 뒤 시트에 통째로 쓰고 그 최종 상태를 DB에 미러했다.
+  이제 시트를 보지 않고 **파일명에서 발견한 것만 DB에 upsert**한다 — 웹앱의 담기는 0822부터
+  `/api/pitch/match`가 DB에 직접 쓰므로(시트는 거기서도 그림자였다) 시트를 거칠 이유가 없다.
+  삭제를 안 하는 원칙 그대로라 DB에 이미 있는 행은 영향받지 않는다.
 """
 import os
 import re
-import time
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import sys
 from datetime import datetime, timezone, timedelta
 
-import supa  # Supabase 이중 쓰기(시트 2단계, 0822) — 미설정이면 조용히 건너뜀
+import supa  # 정본 원장 = Supabase(시트 폐선 2단계, 0914)
 
-SHEET_NAME = "Syntax Pitching DB"
-TAB = "ImageMatching"
-HEADER = ["ImageStudent", "Chapter", "Image", "ContentOwner", "Updated"]
+KST = timezone(timedelta(hours=9))
 TARGET_FOLDERS = ["Syntax Pitching", "Syntax Only", "Syntax + Open-ended Question"]
 SKIP_DIR_TOKENS = ["보류", "보관"]
 CELL_DIR = "cells"                      # 띠를 칸 단위로 자른 사본 폴더(0901). 원본이 아니라 사본이고,
@@ -37,39 +39,14 @@ OWNER_TAIL_RE = re.compile(r"(?:__\d+)+$")  # 이미 번진 꼬리를 읽을 때
 IMG_EXTS = (".png", ".jpg", ".jpeg")
 
 
-def kst_now():
-    return datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
-
-
-def kst_iso(s):
-    """시트 Updated("2026-08-22 09:30:00") → ISO(+09:00). 형식이 아니면 지금 시각."""
-    s = (s or "").strip()
-    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?", s)
-    if not m:
-        return datetime.now(timezone(timedelta(hours=9))).isoformat()
-    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}T{m.group(4)}:{m.group(5)}:{m.group(6) or '00'}+09:00"
-
-
-def with_retry(fn, what, tries=5, base_delay=10.0):
-    """구글 API 5xx·429(쿼터) 지수 백오프 재시도 (2026-08-01 — sync_notion.with_retry와 같은 규약).
-    429는 '분당 쿼터 붐빔'이라 기다리면 풀리는 일시 장애 — 웹앱이 같은 서비스 계정 쿼터를 잠깐 태운 순간
-    스캔 동기화가 통째로 죽던 사고(#54·55·56) 방어. 그 외 4xx(권한·잘못된 요청)는 즉시 raise."""
-    for attempt in range(1, tries + 1):
-        try:
-            return fn()
-        except gspread.exceptions.APIError as e:
-            status = getattr(getattr(e, "response", None), "status_code", None)
-            retryable = status is not None and (status >= 500 or status == 429)
-            if not retryable or attempt == tries:
-                raise
-            delay = base_delay * (2 ** (attempt - 1))
-            print(f"⚠️ 구글 API {status} ({what}) — {attempt}/{tries}회, {delay:.0f}초 후 재시도")
-            time.sleep(delay)
+def kst_now_iso():
+    """updated_at용 ISO(+09:00) 한 줄. 시트 Updated 문자열 왕복(kst_now/kst_iso)이 사라져 직접 만든다."""
+    return datetime.now(KST).isoformat()
 
 
 def parse_named_image(filename):
     """'1-3박대호.png' → ('1-3.png', '박대호'). 주인 suffix 없으면 (None, None).
-    Image 는 앱 app.py 의 match_image_key 와 동일하게 항상 '.png' 로 정규화."""
+    확장자는 항상 '.png' 로 정규화한다(웹앱 담기의 저장 규약과 같은 자리)."""
     name = os.path.splitext(filename)[0]
     if "-" not in name:
         return None, None
@@ -83,17 +60,6 @@ def parse_named_image(filename):
     if not owner:
         return None, None
     return f"{sec}-{slot}.png", owner
-
-
-def canon(image):
-    """'1-3박대호.png' / '1-3.jpeg' / '1-3.png' → '1-3.png' (비교용 정규화, 확장자 .png 통일)."""
-    name = os.path.splitext(image)[0]
-    if "-" in name:
-        sec, rest = name.split("-", 1)
-        m = re.match(r"^(\d+)", rest.strip())
-        if sec.strip().isdigit() and m:
-            return f"{sec.strip()}-{m.group(1)}.png"
-    return image
 
 
 def collect():
@@ -129,83 +95,33 @@ def collect():
 
 
 def main():
-    scope = ["https://www.googleapis.com/auth/spreadsheets",
-             "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("service_key.json", scope)
-    client = gspread.authorize(creds)
-    ss = with_retry(lambda: client.open(SHEET_NAME), "스프레드시트 열기")
-    try:
-        ws = with_retry(lambda: ss.worksheet(TAB), "워크시트 조회")
-    except gspread.exceptions.WorksheetNotFound:
-        ws = ss.add_worksheet(title=TAB, rows=2000, cols=6)
-        ws.append_row(HEADER)
+    """파일명에서 발견한 매칭을 `image_matching`에 upsert. 삭제는 하지 않는다.
 
-    existing = with_retry(lambda: ws.get_all_values(), "본문 읽기")
-    rows = [r[:] for r in existing[1:]] if len(existing) > 1 else []
-    # ★ 헤더 보존(2026-08-01) — 웹앱이 0729에 F열 'Set'(주 2회 보드 세트)을 추가했다. 여기서 고정 HEADER로
-    #   덮으면 그 열 이름이 사라져 웹앱의 세트 필터가 통째로 무력화됨. 시트의 기존 헤더가 더 넓으면 그대로 쓴다.
-    header = existing[0][:] if existing and len(existing[0]) >= len(HEADER) else HEADER[:]
-
-    # 키에 세트(F열)까지 포함 — 같은 좌표라도 반이 다르면 다른 행(2026-08-01).
-    idx = {}
-    for i, r in enumerate(rows):
-        if len(r) >= 3:
-            idx[(r[0], r[1], canon(r[2]), (r[5].strip() if len(r) > 5 else ""))] = i
-
+    ★ 부분 실패는 exit 1. 시트 이중 쓰기가 있던 때는 시트가 받아 줬지만 이제 받아줄 곳이 없어,
+      조용한 부분 반영 = 담기가 조용히 유실되는 길이다(0907 '소리 내어 죽는다'와 같은 결).
+    """
     found = collect()
-    ts = kst_now()
-    updated = appended = 0
-    for (student, chapter, image, bset), owner in sorted(found.items()):
-        key = (student, chapter, canon(image), bset)
-        if key in idx:
-            r = rows[idx[key]]
-            while len(r) < 6:
-                r.append("")
-            r[2], r[3], r[4], r[5] = image, owner, ts, bset
-            updated += 1
-        else:
-            rows.append([student, chapter, image, owner, ts, bset])
-            idx[key] = len(rows) - 1
-            appended += 1
-    # 세트 행을 쓰는데 시트 헤더가 아직 5칸이면 F열 이름을 세워둔다(웹앱이 헤더명으로 열을 읽음).
-    if any(len(r) > 5 and r[5] for r in rows) and len(header) < 6:
-        header = header + [""] * (6 - len(header))
-        header[5] = "Set"
+    if not found:
+        print("ImageMatching sync: 주인 붙은 파일 0개 — DB는 손대지 않습니다.")
+        return
 
-    # ⚠ 행마다 update/append 호출하면 구글 쓰기 쿼터(분당 ~60) 초과로 실패함 → '한 번의 통째 쓰기'.
-    # ★ clear() 선행 폐지(2026-08-01, sync_notion 0706 규칙 이식): '지우기 → 쓰기' 사이에 API가 죽으면
-    #   (429·5xx) ImageMatching이 텅 빈 채 남아 전 학생 담기 정보가 증발한다 — 쿼터 사고가 실제로
-    #   나던 중이라 실현 직전이었음. 덮어쓰기 먼저 → 남는 아래 행만 뒤에 정리(어느 시점에 죽어도 온전).
-    values = [header] + rows
-    with_retry(lambda: ws.update("A1", values), "본문 덮어쓰기")
-    old_rows = ws.row_count
-    if old_rows > len(values):
-        with_retry(lambda: ws.batch_clear([f"A{len(values) + 1}:Z{old_rows}"]), "잔여 행 정리")
-
-    print(f"ImageMatching sync: {updated} updated, {appended} appended, "
-          f"total {len(rows)} rows (named files: {len(found)})")
-
-    # ── Supabase 이중 쓰기(시트 2단계, 2026-08-22) ──
-    #   웹앱이 image_matching 테이블에서 읽는다. 시트 쓰기가 끝난 뒤 같은 내용을 DB에도 upsert.
-    #   ★ 이번에 파일명으로 발견한 것(found)만이 아니라 **시트 최종 상태 전량**을 보낸다 —
-    #     앱이 시트에 직접 쓴 담기까지 DB에 반영돼야 두 원장이 벌어지지 않는다.
-    #   ★ 삭제는 하지 않는다(이 스크립트의 원래 원칙 그대로 — upsert만).
-    mirror = []
-    for r in rows:
-        student = (r[0] if len(r) > 0 else "").strip()
-        chapter = (r[1] if len(r) > 1 else "").strip()
-        image = canon((r[2] if len(r) > 2 else "").strip())
-        if not student or not chapter or not image:
-            continue
-        mirror.append({
+    at = kst_now_iso()
+    mirror = [
+        {
             "student": student,
             "chapter": chapter,
-            "image_key": image,
-            "set_key": (r[5].strip() if len(r) > 5 and r[5] else ""),
-            "content_owner": (r[3] if len(r) > 3 else "").strip(),
-            "updated_at": kst_iso(r[4] if len(r) > 4 else ""),
-        })
-    supa.upsert("image_matching", "student,chapter,image_key,set_key", mirror, "그림 매칭")
+            "image_key": image,   # parse_named_image가 이미 '{구간}-{슬롯}.png'로 정규화해 돌려준다
+            "set_key": bset,
+            "content_owner": owner,
+            "updated_at": at,
+        }
+        for (student, chapter, image, bset), owner in sorted(found.items())
+    ]
+    done = supa.upsert("image_matching", "student,chapter,image_key,set_key", mirror, "그림 매칭")
+    print(f"ImageMatching sync: {done}/{len(mirror)} rows upserted (named files: {len(found)})")
+    if done != len(mirror):
+        print("❌ 일부만 반영됨 — 실패로 끝냅니다(다음 실행이 같은 파일을 다시 올린다).")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -45,13 +45,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install openai gspread oauth2client
-
-      - name: Write service account key
-        env:
-          GCP_SERVICE_KEY_JSON: ${{ secrets.GCP_SERVICE_KEY_JSON }}
-        run: |
-          printf '%s' "$GCP_SERVICE_KEY_JSON" > service_key.json
+          pip install openai
 
       - name: Write OpenAI key file
         env:
@@ -76,7 +70,7 @@ jobs:
       - name: Clean up secret files
         if: always()
         run: |
-          rm -f service_key.json openai_key.txt
+          rm -f openai_key.txt
 
       - name: Check for new audio files
         id: check_audio
