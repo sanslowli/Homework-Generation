@@ -1,25 +1,23 @@
 """
-Supabase(PostgREST) 미러 — 시트 2단계(2026-08-22).
+Supabase(PostgREST) 창구 — 이 레포 스크립트가 원장을 읽고 쓰는 유일한 문.
 
-왜 있나:
-  웹앱(kusukmap.com)이 ImageMatching·SentenceBank를 **Supabase에서 읽도록** 바뀌었다.
-  이 레포의 sync 스크립트는 여전히 구글 시트에 쓰는데, 그것만으론 DB가 낡는다.
-  → 시트에 쓰던 그 순간 **DB에도 같이 upsert**(이중 쓰기)한다.
-  시트를 계속 쓰는 이유 = 웹앱(Vercel)과 이 레포(Actions)의 배포 시점이 달라서.
-  양쪽에 같은 내용이 있으면 그 시차가 무해하고, 되돌릴 때도 시트가 살아 있다.
+계보:
+  2026-08-22 시트 2단계 — 시트에 쓰던 순간 DB에도 같이 upsert(이중 쓰기).
+  2026-09-07 1단계 폐선 — TTS 읽기원이 시트 → `sentence_bank`(DB).
+  2026-09-14 2단계 폐선 — sync 둘의 시트 쓰기 제거. **시트 = 동결 백업(쓰기 0)**, 원장 = DB 단독.
+  2026-09-22 — 마지막 시트 소비자(backfill_image_filenames.py)도 `select`로 DB를 읽는다. gspread 의존 0.
 
 ★ 절대 금지 — '전체 삭제 후 재기입'.
   2026-08-01 사고(ImageMatching이 텅 빈 채 남아 전 학생 담기 정보 증발)의 재현 경로다.
-  여기 함수는 **upsert만** 한다. 사라진 키 정리가 필요하면 그때 별도로, 명시적으로.
+  여기 함수는 **upsert만** 한다(`prune_stale`은 이번 배치가 만진 챕터 안의 낡은 행만, 전 행 upsert 성공 뒤에만).
 
-★ 실패해도 스크립트를 죽이지 않는다(경고만).
-  시트 쓰기가 정상 끝났다면 이번 회차는 성공이고, DB는 다음 실행이 따라잡는다.
-  웹앱에도 시트 폴백이 있어 학생 화면은 안 멈춘다.
+★ DB 쓰기 실패 = 소리 내어 죽는다(exit 1, 0914).
+  받아줄 시트가 없어졌으므로 조용한 부분 반영 = 유실이다. 크론이 Supabase 장애 때 빨개지는 것이 정상.
 
 필요 secret (GitHub Actions):
   SUPABASE_URL              — https://xxxx.supabase.co
   SUPABASE_SERVICE_ROLE_KEY — 서버 전용 비밀키(RLS 우회)
-  둘 중 하나라도 없으면 조용히 건너뛴다(= 종전과 동일하게 시트만 쓰고 끝).
+  둘 중 하나라도 없으면 exit 1(0914 — 종전 "조용히 건너뛰고 시트만 쓴다"는 폐선과 함께 소멸).
 """
 import json
 import os
@@ -181,3 +179,26 @@ def upsert(table, on_conflict, rows, label=""):
                 time.sleep(2 * attempt)
     print(f"🗄️ Supabase 미러: {table} {done}행 upsert")
     return done
+
+
+def select(table, query="", label=""):
+    """table에서 행을 읽는다(PostgREST GET). query = "select=a,b&chapter=eq.605" 꼴(order 명시 권장).
+    PostgREST 응답 상한(1000행)은 Range 헤더로 자동 페이지네이션한다.
+    미설정·실패는 예외로 올린다 — 읽기원이 DB뿐이라 빈 목록을 조용히 돌리면 호출부가 '매칭 0건'으로 오독한다(0914 규약)."""
+    url, key = _env()
+    if not url or not key:
+        raise RuntimeError(f"SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY 미설정 — {label or table}을(를) 읽을 수 없다")
+    out, start = [], 0
+    while True:
+        req = urllib.request.Request(
+            f"{url}/rest/v1/{table}?{query}",
+            headers={"apikey": key, "Authorization": f"Bearer {key}", "Range": f"{start}-{start + 999}"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as res:
+            chunk = json.loads(res.read().decode("utf-8"))
+        if not isinstance(chunk, list):
+            raise RuntimeError(f"{label or table} 읽기 응답이 목록이 아니다: {str(chunk)[:200]}")
+        out.extend(chunk)
+        if len(chunk) < 1000:
+            return out
+        start += 1000
