@@ -1,0 +1,51 @@
+name: Sync Notion → SentenceBank
+
+# 실행 방법:
+#   1. GitHub 레포 → Actions → "Sync Notion → SentenceBank" → Run workflow (수동)
+#   2. 노션 버튼 → webhook → 자동 트리거
+#   3. 매일 KST 04:00 자동 (안전망)
+#
+# 작업 내용:
+#   노션 예문 DB 읽기 → 회색·취소선 제거 → 챕터 매핑 적용 →
+#   Supabase sentence_bank 에 upsert (구글 시트 쓰기는 0914 폐선)
+
+on:
+  workflow_dispatch:           # 수동 실행 + 노션 webhook 트리거용
+  schedule:
+    - cron: '0 19 * * *'       # 매일 UTC 19:00 = KST 04:00 (안전망)
+
+permissions:
+  contents: read               # DB만 쓰니까 레포 commit 불필요
+
+# 동시에 여러 번 트리거되어도 한 번에 하나만
+concurrency:
+  group: homework-pipeline  # generate_tts.yml / sync_and_tts.yml과 공유 — 셋 다 동시 실행 방지
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install requests
+
+      - name: Run sync_notion.py
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python sync_notion.py
+
+      - name: Summary
+        run: echo "✅ 노션 → sentence_bank(DB) 동기화 완료."

@@ -1,0 +1,46 @@
+name: Sync filenames → ImageMatching
+
+# 선생님이 그림 파일을 '1-3박대호.png' 처럼 주인 이름을 붙여 push 하면,
+# 파일명을 파싱해 Supabase image_matching 테이블에 upsert 한다.
+# (학생이 웹앱에서 한 담기는 웹앱이 DB에 직접 쓰므로, 여기선 삭제 없이 upsert 만.)
+#
+# 필요 secret:
+#   SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY — 없으면 쓸 곳이 없어 실패로 끝난다(0914 시트 폐선).
+#   ~~GCP_SERVICE_KEY_JSON~~ = 0914 폐선(시트 쓰기 제거).
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Syntax Pitching/**'
+      - 'Syntax Only/**'
+      - 'Syntax + Open-ended Question/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read          # DB만 쓰니까 repo commit 불필요
+
+concurrency:
+  group: homework-pipeline   # 다른 sync/tts 워크플로와 공유 — 동시 실행 방지
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run sync_imagematching.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python sync_imagematching.py
+
+      - name: Summary
+        run: echo "✅ 파일명 → image_matching(DB) 동기화 완료."

@@ -1,0 +1,20 @@
+# 1. 맥(Mac) 시스템 찌꺼기 영구 차단 (아까 에러 완벽 복원)
+.DS_Store
+**/.DS_Store
+
+# 2. 무거운 영상/압축 파일 차단 (깃허브 용량 초과 방지)
+*.mp4
+*.mov
+*.zip
+
+# 3. 절대 올라가면 안 되는 보안 파일 차단
+service_key.json
+openai_key.txt
+
+# 4. 파이썬 캐시 파일 차단 (앱 구동시 생기는 찌꺼기)
+__pycache__/
+*.pyc
+*.pyo
+
+# 5. Cowork (Claude) 내부 작업 파일 차단
+.claude/

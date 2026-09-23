@@ -1,0 +1,3 @@
+# 파이프라인(Actions)이 쓰는 것만 — 0922. Streamlit 앱(app.py)은 0814 폐기, 시트 의존(gspread·oauth2client)은 0914~0922 폐선.
+requests
+openai
