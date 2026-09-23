@@ -30,7 +30,7 @@ import supa  # 원장 창구(0922) — 시트가 아니라 DB를 읽는다
 
 TARGET_FOLDERS = ["Syntax Pitching", "Syntax Only", "Syntax + Open-ended Question"]
 SKIP_DIR_TOKENS = ["보류", "보관"]
-IMG_EXTS = (".png", ".jpg", ".jpeg")
+IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp")  # 띠도 webp(웹앱 0923 — 해상도 상한, 구 Safari는 png). Image 키 정규화(.png)는 불변
 
 
 def extract_section_slot(filename):

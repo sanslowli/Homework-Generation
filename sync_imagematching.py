@@ -36,7 +36,7 @@ SKIP_DIR_TOKENS = ["보류", "보관"]
 CELL_DIR = "cells"                      # 띠를 칸 단위로 자른 사본 폴더(0901). 원본이 아니라 사본이고,
                                         # 파일명이 '1-1이우강__1.png'라 주인이 '이우강__1'로 읽힌다 → 내려가지 않는다(0907)
 OWNER_TAIL_RE = re.compile(r"(?:__\d+)+$")  # 이미 번진 꼬리를 읽을 때 떼는 안전망(0907)
-IMG_EXTS = (".png", ".jpg", ".jpeg")
+IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp")  # 띠도 webp(웹앱 0923 — 해상도 상한, 구 Safari는 png). Image 키 정규화(.png)는 불변
 
 
 def kst_now_iso():
