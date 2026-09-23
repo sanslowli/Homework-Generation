@@ -1,2 +1,0 @@
-cd "/Users/seojaeyeong/숙제 생성"
-python3 syntax_pitching.py
