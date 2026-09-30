@@ -69,6 +69,7 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SENTENCE_SOURCE: ${{ vars.SENTENCE_SOURCE }}  # repository variable — 'db'면 노션 대신 sentence_page·sentence 표를 읽는다(비어 있으면 노션, 1001)
         run: python sync_notion.py
 
       # ─── 2단계: sentence_bank → TTS mp3 생성 ───
