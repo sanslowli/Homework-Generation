@@ -55,7 +55,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install requests openai
+          pip install requests openai boto3   # boto3 = R2 버킷 PUT(창고 이전 2단계, 1019)
 
       - name: Write OpenAI key file
         env:
@@ -77,6 +77,11 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}                         # 창고 이전 2단계(1019) — 다섯 전부 있을 때만 mp3를 R2 버킷·장부 art_file에도 쓴다(비면 "art 건너뜀", 창고 커밋만)
+          R2_ART_BUCKET: ${{ secrets.R2_ART_BUCKET }}
+          R2_ART_PUBLIC_BASE: ${{ secrets.R2_ART_PUBLIC_BASE }}
+          R2_ART_ACCESS_KEY_ID: ${{ secrets.R2_ART_ACCESS_KEY_ID }}
+          R2_ART_SECRET_ACCESS_KEY: ${{ secrets.R2_ART_SECRET_ACCESS_KEY }}
         run: |
           ARGS="--yes"
           if [ -n "${{ inputs.chapter }}" ]; then
