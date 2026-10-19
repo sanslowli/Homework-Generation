@@ -6,6 +6,8 @@ Supabase(PostgREST) 창구 — 이 레포 스크립트가 원장을 읽고 쓰�
   2026-09-07 1단계 폐선 — TTS 읽기원이 시트 → `sentence_bank`(DB).
   2026-09-14 2단계 폐선 — sync 둘의 시트 쓰기 제거. **시트 = 동결 백업(쓰기 0)**, 원장 = DB 단독.
   2026-09-22 — 마지막 시트 소비자(backfill_image_filenames.py)도 `select`로 DB를 읽는다. gspread 의존 0.
+  2026-10-19 — 그림·음원 장부 `art_file`(창고 이전 2단계, 웹앱 docs/art-storage-spec.md §4-2) 쓰기 `record_art_file` —
+               웹앱 `src/lib/artStore.ts` `recordArtFile`과 같은 규칙(같은 좌표 같은 지문 = 메타만 · 다르면 옛 행 replaced_at + 새 행 · 삭제 0).
 
 ★ 절대 금지 — '전체 삭제 후 재기입'.
   2026-08-01 사고(ImageMatching이 텅 빈 채 남아 전 학생 담기 정보 증발)의 재현 경로다.
@@ -202,3 +204,86 @@ def select(table, query="", label=""):
         if len(chunk) < 1000:
             return out
         start += 1000
+
+
+# ─── 그림·음원 장부 art_file(1019, 창고 이전 2단계) ────────────────────────────
+# 웹앱 `src/lib/artStore.ts` `recordArtFile`의 파이썬 쌍둥이 — 열·열쇠·규칙을 그대로 따른다(발주서 §4-2).
+#   살아 있는 행 = replaced_at is null. 같은 좌표(음원 = kind·chapter·pane·owner)에
+#     · 같은 hash가 살아 있으면 → 메타(name·legacy_path·legacy_sha·sentence·object_key·content_type)만 맞추고, 다른 hash의 살아 있는 행은 replaced_at
+#     · 없으면 → 살아 있는 행 전부 replaced_at=now 뒤 새 행 insert
+#   삭제는 하지 않는다(0801 전멸 규약).
+ART_COLS = "id,kind,chapter,pane,owner,name,legacy_path,legacy_sha,object_key,content_type,bytes,hash,sentence,source,replaced_at"
+ART_META_KEYS = ("name", "legacy_path", "legacy_sha", "sentence", "object_key", "content_type")
+
+
+def _nfc(s):
+    import unicodedata
+    return unicodedata.normalize("NFC", (s or "").strip())
+
+
+def _req(url, key, path, method, body=None, prefer="return=minimal"):
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(
+        f"{url}/rest/v1/{path}",
+        data=data,
+        method=method,
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Prefer": prefer,
+        },
+    )
+    with urllib.request.urlopen(req, timeout=60) as res:
+        raw = res.read()
+        return json.loads(raw.decode("utf-8")) if raw else None
+
+
+def record_art_file(coord, file, label=""):
+    """장부 한 행 — coord = {kind, chapter, pane, owner, name, legacy_path, legacy_sha?, sentence?, source?} ·
+    file = {object_key, content_type, bytes, hash}. 반환 {"changed": bool, "replaced": int}.
+    Supabase 미설정이면 예외(호출부가 secrets 유무를 먼저 본다 — 여기까지 왔는데 없으면 설정 오류)."""
+    url, key = _env()
+    if not url or not key:
+        raise RuntimeError(f"SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY 미설정 — art_file({label})을(를) 쓸 수 없다")
+    kind = coord.get("kind", "voice")
+    chapter, pane, owner = _nfc(coord.get("chapter")), _nfc(coord.get("pane")), _nfc(coord.get("owner"))
+    q = urllib.parse.quote
+    live_filter = f"kind=eq.{kind}&chapter=eq.{q(chapter)}&pane=eq.{q(pane)}&owner=eq.{q(owner)}&replaced_at=is.null"
+    live = _req(url, key, f"art_file?select={ART_COLS}&{live_filter}&order=created_at", "GET") or []
+    row = {
+        "kind": kind,
+        "holder": "",
+        "holder_person_id": None,
+        "chapter": chapter,
+        "section": None,
+        "slot": None,
+        "cell_idx": 0,
+        "pane": pane,
+        "owner": owner,
+        "mode": "",
+        "shelf": "current",
+        "name": _nfc(coord.get("name")),
+        "legacy_path": coord.get("legacy_path"),
+        "object_key": file["object_key"],
+        "content_type": file.get("content_type", ""),
+        "bytes": int(file.get("bytes", 0)),
+        "hash": file["hash"],
+        "sentence": coord.get("sentence", "") or "",
+        "legacy_sha": coord.get("legacy_sha"),
+        "source": coord.get("source", "tts"),
+    }
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    same = next((r for r in live if r.get("hash") == file["hash"]), None)
+    if same:
+        patch = {k: row[k] for k in ART_META_KEYS if same.get(k) != row[k] and (row[k] is not None or same.get(k) is not None)}
+        if patch:
+            _req(url, key, f"art_file?id=eq.{same['id']}", "PATCH", patch)
+        others = [r for r in live if r["id"] != same["id"]]
+        if others:
+            _req(url, key, f"art_file?{live_filter}&id=neq.{same['id']}", "PATCH", {"replaced_at": now})
+        return {"changed": False, "replaced": len(others)}
+    if live:
+        _req(url, key, f"art_file?{live_filter}", "PATCH", {"replaced_at": now})
+    _req(url, key, "art_file", "POST", row)
+    return {"changed": True, "replaced": len(live)}

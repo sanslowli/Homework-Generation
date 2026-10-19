@@ -26,6 +26,15 @@ generate_tts.py — SentenceBank 기준으로 OpenAI TTS mp3 파일 생성
     - --force 플래그                      → 무조건 재생성
 - 사이드카 .txt 파일은 mp3와 짝지어 저장되어, 다음 실행 때 변경 감지 기준이 됨
 
+[창고 이전 2단계 — 이중 쓰기 (2026-10-19, 웹앱 docs/art-storage-spec.md §4-5·§5)]
+- mp3 생성 성공 직후 **창고 파일 그리고** R2 버킷·장부에도 쓴다:
+    열쇠 = 내용 지문 `voice/{sha256 앞 16자}.mp3`(불변, Cache-Control 1년 immutable · 이미 있으면 PUT 건너뜀)
+    장부 = Supabase `art_file`(kind=voice · 좌표 chapter/pane/owner · name `{Pane}_{Owner}.mp3` · legacy_path `audio/{챕터}/{Pane}_{Owner}.mp3`
+           · sentence = 생성 원문 · source=tts) — 규칙은 `supa.record_art_file`(웹앱 `lib/artStore.recordArtFile`의 쌍둥이).
+- secrets `R2_ENDPOINT`·`R2_ART_BUCKET`·`R2_ART_PUBLIC_BASE`·`R2_ART_ACCESS_KEY_ID`·`R2_ART_SECRET_ACCESS_KEY` 중 하나라도 비면
+  "art 건너뜀" 한 줄만 찍고 종전대로(창고 커밋만) 간다. 버킷·장부 실패는 mp3 실패로 치지 않는다(창고 커밋은 그대로 — 장부 누락은 웹앱 대조 `/api/admin/art-parity`가 잡는다).
+- 변경 감지는 아직 사이드카 .txt(5단계 창고 쓰기 끊기 때 장부 `sentence` 열로).
+
 [옛 파일과의 공존]
 - 기존 section 기반 mp3는 _old 접미사로 archive됨 (예: 602/1_박대호_old.mp3)
 - 새 pane 기반 mp3는 깨끗한 양식 (예: 602/1_박대호.mp3, 602/2_박대호.mp3, ...)
@@ -35,6 +44,7 @@ generate_tts.py — SentenceBank 기준으로 OpenAI TTS mp3 파일 생성
 import os
 import sys
 import time
+import hashlib
 import argparse
 import supa  # 읽기원 = Supabase(2026-09-07 시트 폐선 1단계)
 from pathlib import Path
@@ -128,8 +138,93 @@ def write_sidecar(sidecar_path, text):
         f.write(text)
 
 
+# ─── 창고 이전 2단계: R2 버킷 + 장부 art_file (1019) ───────────────────────────
+ART_ENV_KEYS = ("R2_ENDPOINT", "R2_ART_BUCKET", "R2_ART_PUBLIC_BASE", "R2_ART_ACCESS_KEY_ID", "R2_ART_SECRET_ACCESS_KEY")
+ART_CACHE_CONTROL = "public, max-age=31536000, immutable"
+_art_client = None
+
+
+def art_env():
+    """secrets 다섯이 전부 있으면 dict, 하나라도 비면 None(= 건너뜀)."""
+    env = {k: (os.environ.get(k) or "").strip() for k in ART_ENV_KEYS}
+    if not all(env.values()):
+        return None
+    env["R2_ENDPOINT"] = env["R2_ENDPOINT"].rstrip("/")
+    return env
+
+
+def art_hash(data):
+    """내용 지문 = sha256 hex 앞 16자(웹앱 artStore.artHash와 같은 자리수)."""
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
+def git_blob_sha(data):
+    """창고 커밋이 이 파일에 매길 blob sha(sha1 'blob {n}\\0' + bytes) — 장부 legacy_sha(씨앗 재실행이 이 값으로 '이미 옮김'을 안다)."""
+    h = hashlib.sha1()
+    h.update(f"blob {len(data)}\0".encode("ascii"))
+    h.update(data)
+    return h.hexdigest()
+
+
+def _client(env):
+    global _art_client
+    if _art_client is None:
+        import boto3  # 워크플로가 pip install — 로컬 드라이런엔 없어도 된다(secrets 없으면 여기까지 안 온다)
+        _art_client = boto3.client(
+            "s3",
+            endpoint_url=env["R2_ENDPOINT"],
+            aws_access_key_id=env["R2_ART_ACCESS_KEY_ID"],
+            aws_secret_access_key=env["R2_ART_SECRET_ACCESS_KEY"],
+            region_name="auto",
+        )
+    return _art_client
+
+
+def art_put(env, key, data):
+    """버킷에 올린다 — 열쇠가 지문이라 이미 있으면 건너뜀(멱등). 반환 True = 올림, False = 있었음."""
+    s3 = _client(env)
+    try:
+        s3.head_object(Bucket=env["R2_ART_BUCKET"], Key=key)
+        return False
+    except Exception as e:  # 404 = 없음 → PUT · 그 밖(권한 등)은 PUT에서 다시 드러난다
+        code = str(getattr(e, "response", {}).get("Error", {}).get("Code", ""))
+        if code not in ("404", "NoSuchKey", "NotFound"):
+            print(f"(HEAD {code or type(e).__name__})", end=" ")
+    s3.put_object(
+        Bucket=env["R2_ART_BUCKET"],
+        Key=key,
+        Body=data,
+        ContentType="audio/mpeg",
+        CacheControl=ART_CACHE_CONTROL,
+    )
+    return True
+
+
+def store_art(env, chapter, pane, owner, sentence, data):
+    """mp3 바이트 한 벌을 버킷 + 장부에. 반환 {"stored": bool, "changed": bool, "key": str}. 실패 = 예외(호출부가 mp3 실패로 치지 않는다)."""
+    h = art_hash(data)
+    key = f"voice/{h}.mp3"
+    stored = art_put(env, key, data)
+    rec = supa.record_art_file(
+        {
+            "kind": "voice",
+            "chapter": chapter,
+            "pane": pane,
+            "owner": owner,
+            "name": f"{pane}_{owner}.mp3",
+            "legacy_path": f"audio/{chapter}/{pane}_{owner}.mp3",
+            "legacy_sha": git_blob_sha(data),
+            "sentence": sentence,
+            "source": "tts",
+        },
+        {"object_key": key, "content_type": "audio/mpeg", "bytes": len(data), "hash": h},
+        label=f"{chapter}/{pane}_{owner}",
+    )
+    return {"stored": stored, "changed": rec["changed"], "key": key}
+
+
 def generate_one(openai_client, text, out_path, voice, model, speed):
-    """OpenAI TTS 로 mp3 생성 후 out_path 에 저장."""
+    """OpenAI TTS 로 mp3 생성 후 out_path 에 저장. 생성된 바이트를 돌려준다(버킷·장부 쓰기용)."""
     Path(os.path.dirname(out_path)).mkdir(parents=True, exist_ok=True)
     response = openai_client.audio.speech.create(
         model=model,
@@ -137,8 +232,10 @@ def generate_one(openai_client, text, out_path, voice, model, speed):
         input=text,
         speed=speed,
     )
+    data = response.content
     with open(out_path, "wb") as f:
-        f.write(response.content)
+        f.write(data)
+    return data
 
 
 def main():
@@ -201,6 +298,14 @@ def main():
         if len(to_generate) > 10:
             print(f"   ... 외 {len(to_generate) - 10}개")
 
+    # 창고 이전 2단계 — 버킷·장부 이중 쓰기 켜졌나(secrets 다섯 전부 있을 때만)
+    art = art_env()
+    if art:
+        print(f"\n🪣 art 이중 쓰기 켜짐 — 버킷 {art['R2_ART_BUCKET']} ({art['R2_ART_PUBLIC_BASE']}) + 장부 art_file")
+    else:
+        missing = [k for k in ART_ENV_KEYS if not (os.environ.get(k) or "").strip()]
+        print(f"\nℹ️ art 건너뜀 — R2 secrets 미설정({', '.join(missing)}) · 창고 커밋만")
+
     if args.dry_run:
         print("\n--dry-run 모드 — 실제 생성은 하지 않습니다.")
         return
@@ -229,17 +334,30 @@ def main():
     print("\n🎙️ 음성 생성 시작...\n")
     success = 0
     failed = []
+    art_n = {"stored": 0, "unchanged": 0, "failed": []}  # 버킷·장부 영수증(mp3 성패와 별개)
     for i, (ch, pane, owner, sentence, out_path, sidecar_path, _) in enumerate(to_generate, 1):
         rel = os.path.relpath(out_path, BASE_FOLDER)
         print(f"[{i}/{len(to_generate)}] {rel} ...", end=" ", flush=True)
         try:
-            generate_one(openai_client, sentence, out_path, args.voice, args.model, args.speed)
+            data = generate_one(openai_client, sentence, out_path, args.voice, args.model, args.speed)
             write_sidecar(sidecar_path, sentence)  # 성공 시에만 사이드카 갱신
-            print("✅")
+            print("✅", end=" ", flush=True)
             success += 1
         except Exception as e:
             print(f"❌  {e}")
             failed.append((rel, str(e)))
+            continue
+        if not art:
+            print()
+            continue
+        # 창고 파일은 이미 섰다 — 버킷·장부는 덤이라 실패해도 mp3 실패로 치지 않는다(2단계 규약)
+        try:
+            r = store_art(art, ch, pane, owner, sentence, data)
+            art_n["stored" if r["stored"] else "unchanged"] += 1
+            print(f"🪣 {r['key']}" + ("" if r["stored"] else " (있음)") + ("" if r["changed"] else " 장부 같음"))
+        except Exception as e:
+            print(f"⚠️ art 실패: {e}")
+            art_n["failed"].append((rel, str(e)))
 
     print(f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print(f"✅ 성공: {success} / {len(to_generate)}")
@@ -247,6 +365,12 @@ def main():
         print(f"❌ 실패: {len(failed)}")
         for rel, err in failed:
             print(f"   • {rel}: {err}")
+    if art:
+        print(f"🪣 art: 버킷 올림 {art_n['stored']} · 이미 있음 {art_n['unchanged']} · 실패 {len(art_n['failed'])}")
+        for rel, err in art_n["failed"]:
+            print(f"   • {rel}: {err}")
+        if art_n["failed"]:
+            print("   (버킷·장부 실패는 mp3 실패가 아니다 — 창고 커밋은 그대로, 누락은 웹앱 /api/admin/art-parity가 잡는다)")
     print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print(f"\n다음 단계: git add audio/ && git commit -m 'Add TTS audio files' && git push")
 
