@@ -233,10 +233,13 @@ def find_section(chapter: str, pane: int, chapter_mapping: dict):
     """주어진 chapter+pane이 몇 번 구간에 속하는지.
 
     "603" 또는 "603S" → "603(S)" 매핑을 공유.
+    단 기초 챕터가 **제 이름 페이지**('503S')를 따로 가지면 그것이 먼저다(1110 San — 템플릿 없는 5XX는
+    심화·기초 판의 칸 수가 달라 구간표가 갈린다: 503 = 2·3·2·3칸, 503S = 3·3·2·2칸). 6XX처럼 'XS' 페이지가 없으면 종전 그대로 짝.
     """
     base = chapter.rstrip("S")
     pair_key = f"{base}(S)"
-    sections = chapter_mapping.get(pair_key) or chapter_mapping.get(chapter)
+    own = chapter_mapping.get(chapter) if chapter.endswith("S") else None
+    sections = own or chapter_mapping.get(pair_key) or chapter_mapping.get(chapter)
     if not sections:
         return None
     for sec_num, (start, end) in sections.items():
